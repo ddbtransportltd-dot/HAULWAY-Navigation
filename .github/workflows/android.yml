@@ -9,35 +9,30 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - name: Extract HAULWAY project
-        run: unzip -o HAULWAY_MAP_TILE_URL_FIX_V2.zip -d .
-
-      - name: Configure Android and ORS
+        run: unzip -o HAULWAY_MAP_TILE_URL_FIX_V3_CARTO.zip -d .
+      - name: Configure Android and API keys
         working-directory: HAULWAYNavigation
         env:
           ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "ORS_API_KEY=$ORS_API_KEY" >> local.properties
-
+          echo "CARTO_API_KEY=$CARTO_API_KEY" >> local.properties
       - name: Build HAULWAY APK
         working-directory: HAULWAYNavigation
         run: chmod +x gradlew && ./gradlew assembleDebug
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
