@@ -10,6 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,15 +23,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Extract HAULWAY project
+        run: unzip -o HAULWAY_MAP_TILE_URL_FIX_V2.zip -d .
 
-      - name: Configure ORS API Key
+      - name: Configure Android and ORS
         working-directory: HAULWAYNavigation
         env:
           ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
         run: |
-          echo "ORS_API_KEY=$ORS_API_KEY" > local.properties
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "ORS_API_KEY=$ORS_API_KEY" >> local.properties
 
       - name: Build HAULWAY APK
         working-directory: HAULWAYNavigation
