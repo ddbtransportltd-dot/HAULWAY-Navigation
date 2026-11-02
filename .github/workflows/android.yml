@@ -3,7 +3,7 @@ name: HAULWAY Android Build
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -11,11 +11,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,11 +24,11 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: '12266719'
+          packages: 'platform-tools platforms;android-37 build-tools;37.0.0'
 
-      - name: Install Android platform and build tools
-        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
-
-      - name: Build HAULWAY debug APK
+      - name: Build HAULWAY APK
         env:
           ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
           CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
