@@ -1,0 +1,10 @@
+BUILD FIX - 2026-10-31
+
+The Kotlin errors reported at MainActivity.kt:434 and :446 were caused by
+HaulwayHomeScreen invoking Compose UI functions without being marked @Composable.
+Added @Composable immediately above HaulwayHomeScreen.
+
+Please open this project in Android Studio and run Build > Make Project.
+This environment could not run Gradle because Gradle 9.6.0 was not cached and
+network access to services.gradle.org is unavailable. Therefore this fix has
+not been independently verified by a successful APK build here.

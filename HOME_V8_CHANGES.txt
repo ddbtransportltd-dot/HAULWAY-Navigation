@@ -1,0 +1,11 @@
+HAULWAY Navigation - HOME v8 VISUAL REFINEMENT
+
+Changes based on the user's original "wizja 1" reference:
+- Darker, more opaque navy glass-like tile gradients so labels remain readable while the photo remains visible.
+- Larger tile icons and typography to better match the reference proportions on the landscape tablet.
+- Stronger but restrained blue-grey tile borders and slightly more rounded corners.
+- Larger HAULWAY header mark/text and clearer status text.
+- Taller bottom navigation items, larger icons and labels, and a stronger blue Home active state.
+- Preserved the 3x3 layout, background image, navigation targets, and existing project structure.
+
+Build status: not verified in this environment. Please run Build > Make Project in Android Studio.

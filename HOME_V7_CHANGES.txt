@@ -1,0 +1,10 @@
+HAULWAY Navigation - HOME v7
+
+Changes:
+- Reduced dark overlay on the photographic HOME background so the truck and sunset are clearer.
+- Replaced flat tile fill with a subtle vertical glass-style gradient.
+- Softened tile borders and increased subtle elevation.
+- Added a blue gradient to the selected Home tab and darker gradients to inactive tabs.
+- Kept the 3x3 layout, navigation destinations, and other screens unchanged.
+
+Build status: source edited; Android Gradle build not executed in this environment.

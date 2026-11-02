@@ -1,0 +1,11 @@
+HAULWAY HOME v10 — VISION 1 polish
+
+Changes based on the v9 tablet screenshot and the original wizja 1 reference:
+- More opaque dark glass tile gradient, with a cooler charcoal/blue tint.
+- Softer, thinner blue-grey tile border and reduced elevation/shadow.
+- Larger tile icon scale (62dp) to better match the reference proportions.
+- Slightly stronger title and subtitle typography for the wide tablet layout.
+- Reduced extra dark overlay over the background so the truck remains visible.
+- Preserved the 3x3 grid, destinations, background asset, and bottom navigation.
+
+Build status: source updated; not compiled in this environment. Run Build > Make Project in Android Studio.

@@ -1,0 +1,9 @@
+HAULWAY Navigation — branding and navigation update
+
+- Replaced launcher icon artwork with the new HAULWAY truck/navigation logo.
+- Updated adaptive and legacy launcher icon assets.
+- Restored the six-tab bottom navigation row on the driving map screen: Home, Map, Route, Services, Traffic, More.
+- Map-to-side-rail layout remains 70:30.
+- HOME screen was not modified.
+
+Build validation: source/archive inspection only; an Android Gradle build has not been run in this environment.

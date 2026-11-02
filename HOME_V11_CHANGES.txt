@@ -1,0 +1,13 @@
+HAULWAY Navigation — HOME v11 / VISION 1
+
+1. Android immersive mode enabled to hide system status and navigation bars on HOME and restore it when app regains focus.
+2. HOME tile gradient adjusted to a darker graphite glass appearance.
+3. Tile icons: 43 dp.
+4. Tile titles: 16 sp.
+5. Tile descriptions: 11 sp.
+6. Header height: 34 dp.
+7. Bottom navigation height: 43 dp.
+8. Gaps between tiles: 7 dp.
+9. Background photo, 3x3 layout, menu destinations and click targets retained.
+
+Build status: NOT VERIFIED here. Gradle 9.6.0 distribution could not be downloaded because the environment cannot resolve services.gradle.org.

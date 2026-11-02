@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HAULWAYNavigation.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#071522</item>
+        <!-- Android's mandatory icon slot is transparent; avoid showing a cropped grille. -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/haulway_native_splash_icon</item>
+        <item name="windowSplashScreenIconBackgroundColor">#030A12</item>
+        <item name="postSplashScreenTheme">@style/Theme.HAULWAYNavigation</item>
+    </style>
+</resources>

@@ -1,0 +1,8 @@
+HAULWAY Splash resource-linking fix
+
+- Replaced platform-only android:style/Theme.SplashScreen references with the AndroidX SplashScreen compatibility theme.
+- Added androidx.core:core-splashscreen:1.0.1.
+- Calls installSplashScreen() before super.onCreate().
+- Keeps the existing custom full-screen Compose startup screen and its real task-based progress.
+
+This resolves missing Theme.SplashScreen / postSplashScreenTheme resource errors when those platform resources are not available to the configured compile SDK.
