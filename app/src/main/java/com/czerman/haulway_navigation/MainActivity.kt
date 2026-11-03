@@ -21,6 +21,8 @@ import android.hardware.SensorManager
 import android.widget.Toast
 import android.speech.tts.TextToSpeech
 import java.util.Locale
+import java.util.Date
+import java.text.SimpleDateFormat
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -111,6 +113,8 @@ private object RoutePlanStore {
     var maneuvers by mutableStateOf<List<RouteManeuver>>(emptyList())
     var origin by mutableStateOf("")
     var destination by mutableStateOf("")
+    var totalDistanceMetres by mutableStateOf(0.0)
+    var totalDurationSeconds by mutableStateOf(0.0)
 }
 
 private data class RouteManeuver(
@@ -128,7 +132,9 @@ private data class RouteResult(
     val steps: List<String>,
     val maneuvers: List<RouteManeuver>,
     val waypointCoordinatesJson: String,
-    val legSummaries: List<Pair<String, String>> = emptyList()
+    val legSummaries: List<Pair<String, String>> = emptyList(),
+    val totalDistanceMetres: Double = 0.0,
+    val totalDurationSeconds: Double = 0.0
 )
 
 private fun distanceMetres(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -399,7 +405,7 @@ private suspend fun calculateRoadRoute(
         check(metres > 0.0 && seconds > 0.0) { "HeiGIT returned an incomplete route summary." }
         val distance = String.format(java.util.Locale.UK, "%.1f mi", metres / 1609.344)
         val duration = "${(seconds / 3600).toInt()} h ${((seconds % 3600) / 60).toInt()} min"
-        RouteResult(coords.toString(), distance, duration, steps, maneuvers, coordinates.toString(), legSummaries)
+        RouteResult(coords.toString(), distance, duration, steps, maneuvers, coordinates.toString(), legSummaries, metres, seconds)
     } finally { connection.disconnect() }
 }
 
@@ -581,6 +587,18 @@ fun HaulwayMapScreen() {
     }
 }
 
+private fun maneuverIconFor(instruction: String): ImageVector {
+    val text = instruction.lowercase(Locale.UK)
+    return when {
+        "roundabout" in text -> Icons.Default.RoundaboutRight
+        "uturn" in text || "u-turn" in text -> Icons.Default.AltRoute
+        "left" in text -> Icons.Default.TurnLeft
+        "right" in text -> Icons.Default.TurnRight
+        "straight" in text || "continue" in text -> Icons.Default.ArrowUpward
+        else -> Icons.Default.Navigation
+    }
+}
+
 @Composable
 private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     val appContext: Context = LocalContext.current
@@ -595,6 +613,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
     var headingUp by remember { mutableStateOf(true) }
+    var followEnabled by remember { mutableStateOf(true) }
+    var tilt3D by remember { mutableStateOf(true) }
+    var remainingDistanceMetres by remember { mutableStateOf<Double?>(null) }
+    var remainingDurationSeconds by remember { mutableStateOf<Double?>(null) }
+    var clockText by remember { mutableStateOf(SimpleDateFormat("HH:mm", Locale.UK).format(Date())) }
+    LaunchedEffect(Unit) { while (true) { clockText = SimpleDateFormat("HH:mm", Locale.UK).format(Date()); kotlinx.coroutines.delay(1000) } }
     var soundOn by remember { mutableStateOf(true) }
     var liveSpeedMph by remember { mutableStateOf<Double?>(null) }
     var liveLatitude by remember { mutableStateOf<Double?>(null) }
@@ -706,6 +730,26 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 liveLongitude = location.longitude
                 if (location.hasBearing() && latestGpsSpeedMps >= 1.5f) liveBearing = location.bearing
                 liveAccuracy = accuracy
+                val activeRouteJson = RoutePlanStore.coordinatesJson
+                if (!activeRouteJson.isNullOrBlank() && RoutePlanStore.totalDistanceMetres > 0.0) {
+                    try {
+                        val routePoints = org.json.JSONArray(activeRouteJson)
+                        if (routePoints.length() >= 2) {
+                            val endPoint = routePoints.getJSONArray(routePoints.length() - 1)
+                            val remaining = distanceAlongRouteMetres(
+                                location.latitude, location.longitude,
+                                endPoint.getDouble(1), endPoint.getDouble(0), activeRouteJson
+                            ) ?: distanceMetres(location.latitude, location.longitude, endPoint.getDouble(1), endPoint.getDouble(0))
+                            val boundedRemaining = remaining.coerceIn(0.0, RoutePlanStore.totalDistanceMetres)
+                            remainingDistanceMetres = boundedRemaining
+                            val ratio = (boundedRemaining / RoutePlanStore.totalDistanceMetres).coerceIn(0.0, 1.0)
+                            remainingDurationSeconds = RoutePlanStore.totalDurationSeconds * ratio
+                        }
+                    } catch (_: Exception) { }
+                } else {
+                    remainingDistanceMetres = null
+                    remainingDurationSeconds = null
+                }
                 val distanceFromRoute = distanceToRouteMetres(location.latitude, location.longitude, RoutePlanStore.coordinatesJson)
                 if (distanceFromRoute != null && accuracy <= 45f) {
                     if (distanceFromRoute > maxOf(75.0, accuracy.toDouble() * 1.8)) offRouteReadings++ else offRouteReadings = 0
@@ -726,6 +770,10 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                 )
                                 RoutePlanStore.coordinatesJson = updated.coordinatesJson
                                 RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                remainingDistanceMetres = updated.totalDistanceMetres
+                                remainingDurationSeconds = updated.totalDurationSeconds
                                 RoutePlanStore.steps = updated.steps
                                 RoutePlanStore.maneuvers = updated.maneuvers
                                 RoutePlanStore.origin = "CURRENT LOCATION"
@@ -761,22 +809,14 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     distanceToManeuver = remainingMetres
                     // Announce each approach stage once per maneuver. The spoken distance is
                     // deliberately approximate; the visual distance remains continuously updated.
-                    val stage = when {
-                        remainingMetres <= 120.0 -> "NOW"
-                        remainingMetres <= 400.0 -> "300"
-                        remainingMetres <= 1000.0 -> "800"
-                        else -> ""
-                    }
+                    // One clear spoken approach cue at 500 m; avoid stacked NOW/300 m prompts.
+                    val stage = if (remainingMetres <= 500.0) "500" else ""
                     val speechKey = "$index:$stage"
                     if (soundOn && speechReady && stage.isNotEmpty() && speechKey != lastSpokenStage) {
                         val target = maneuvers[index]
                         val action = target.label.lowercase(Locale.UK)
                         val road = target.roadName.takeIf { it.isNotBlank() }?.let { " onto $it" } ?: ""
-                        val message = when (stage) {
-                            "800" -> "In 800 metres, $action$road"
-                            "300" -> "In 300 metres, $action$road"
-                            else -> "$action now$road"
-                        }
+                        val message = "In 500 metres, $action$road"
                         speechEngine?.speak(message, TextToSpeech.QUEUE_FLUSH, null, speechKey)
                         lastSpokenStage = speechKey
                     }
@@ -822,10 +862,21 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     val blue = Color(0xFF078FE0)
 
     Column(Modifier.fillMaxSize().background(Color(0xFF080E13)).padding(5.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("HAUL", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Text("WAY", color = Color(0xFF168FE8), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+            Spacer(Modifier.weight(1f))
+            Text(clockText, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text("HGV NAVIGATION", color = Color(0xFF9FB0BC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, selectedMapSearchLocation)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
@@ -858,30 +909,23 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
 
-                // Speed limit and trip summary on the left.
+                // Single speed cluster. The old duplicate mini trip/ETA panel is removed.
                 Column(Modifier.align(Alignment.CenterStart).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.Start) {
-                    // The sign stays visibly unknown until a verified road-speed source exists.
                     Surface(
-                        modifier = Modifier.size(43.dp), shape = CircleShape, color = Color.White,
-                        border = androidx.compose.foundation.BorderStroke(3.dp, Color(0xFFD93636)),
-                        shadowElevation = 4.dp
+                        modifier = Modifier.size(54.dp), shape = CircleShape, color = Color.White,
+                        border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD93636)),
+                        shadowElevation = 7.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("—", color = Color(0xFF20252A), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("—", color = Color(0xFF20252A), fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
-                    Text(
-                        liveSpeedMph?.let { String.format(java.util.Locale.UK, "%.0f mph", it) } ?: "GPS speed unavailable",
-                        color = if (liveSpeedMph != null) White else Color(0xFFB7C2CA),
-                        fontSize = if (liveSpeedMph != null) 20.sp else 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Surface(shape = RoundedCornerShape(6.dp), color = panel) {
-                        Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("TRIP", color = Color(0xFF9FB0BC), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text(RoutePlanStore.summary?.substringBefore(" · ") ?: "No route", color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Text(RoutePlanStore.summary?.substringAfter(" · ", "") ?: "Set destination", color = Color(0xFFD7E0E7), fontSize = 12.sp)
-                        }
+                    Surface(shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))) {
+                        Text(
+                            liveSpeedMph?.let { String.format(Locale.UK, "%.0f mph", it) } ?: "GPS —",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            color = White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold
+                        )
                     }
                 }
 
@@ -904,8 +948,14 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Surface(Modifier.size(38.dp).clickable { headingUp = !headingUp }, shape = RoundedCornerShape(8.dp), color = if (headingUp) Color(0xFF087CCB) else panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Explore, if (headingUp) "Vehicle marker follows compass heading; map stays north-up" else "Vehicle marker points north; map stays north-up", tint = White) }
                     }
-                    Surface(Modifier.size(38.dp).clickable { mapFollowRequest++ }, shape = RoundedCornerShape(8.dp), color = panel) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.MyLocation, "Recenter on vehicle", tint = White) }
+                    Surface(Modifier.size(38.dp).clickable {
+                        followEnabled = true
+                        mapFollowRequest++
+                    }, shape = RoundedCornerShape(8.dp), color = Color(0xFF087CCB)) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.MyLocation, "Follow vehicle / recenter map", tint = White) }
+                    }
+                    Surface(Modifier.size(38.dp).clickable { tilt3D = !tilt3D }, shape = RoundedCornerShape(8.dp), color = if (tilt3D) Color(0xFF087CCB) else panel) {
+                        Box(contentAlignment = Alignment.Center) { Text(if (tilt3D) "3D" else "2D", color = White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
                     }
                     Surface(Modifier.size(38.dp).clickable { zoom = (zoom + 1).coerceAtMost(6) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, "Zoom in", tint = White) }
@@ -929,23 +979,17 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Spacer(Modifier.width(5.dp)); Icon(Icons.Default.BatteryFull, null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
                 }
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
-                    RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(2).forEachIndexed { index, maneuver ->
-                        val distanceLabel = if (index == 0 && distanceToManeuver != null)
-                            formatNavigationDistance(distanceToManeuver!!) else "Upcoming"
+                    val maneuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)
+                    if (maneuver != null) {
+                        val distanceLabel = distanceToManeuver?.let(::formatNavigationDistance) ?: "—"
                         NavigationStepCard(
-                            Icons.Default.TurnRight, distanceLabel,
+                            maneuverIconFor(maneuver.label), distanceLabel,
                             maneuver.label + if (maneuver.roadName.isNotBlank()) " · ${maneuver.roadName}" else "",
-                            if (index == 0) blue else Color(0xFF26323B)
+                            blue
                         )
                     }
-                } else if (RoutePlanStore.steps.isNotEmpty()) {
-                    RoutePlanStore.steps.take(2).forEachIndexed { index, step ->
-                        NavigationStepCard(Icons.Default.TurnRight, step.substringBefore(" · ", "—"),
-                            step.substringAfter(" · ", step), if (index == 0) blue else Color(0xFF26323B))
-                    }
                 } else {
-                    NavigationStepCard(Icons.Default.TurnRight, "—", "Next manoeuvre", blue)
-                    NavigationStepCard(Icons.Default.TurnRight, "—", "Route not started", Color(0xFF26323B))
+                    NavigationStepCard(Icons.Default.Navigation, "—", "Waiting for route", blue)
                 }
                 MapQuickActionCard(
                     icon = Icons.Default.LocalParking, title = "Truck parking", subtitle = "Find nearby parking",
@@ -962,18 +1006,24 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(4.dp), maxLines = 2
                 )
-                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let { summary ->
-                    val parts = summary.split(" · ")
+                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let {
+                    val distanceLabel = remainingDistanceMetres?.let(::formatNavigationDistance)
+                        ?: RoutePlanStore.summary?.substringBefore(" · ") ?: "—"
+                    val secondsLeft = remainingDurationSeconds
+                    val etaLabel = if (secondsLeft != null) {
+                        val mins = (secondsLeft / 60.0).toInt().coerceAtLeast(0)
+                        "${mins / 60} h ${mins % 60} min"
+                    } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(parts.getOrElse(0) { "—" }, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(distanceLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                             Spacer(Modifier.width(5.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(parts.getOrElse(1) { "—" }, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                         }
                     }
@@ -1109,6 +1159,10 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                             )
                                             RoutePlanStore.coordinatesJson = calculated.coordinatesJson
                                             RoutePlanStore.summary = "${calculated.distanceText} · ${calculated.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
+                                            remainingDistanceMetres = calculated.totalDistanceMetres
+                                            remainingDurationSeconds = calculated.totalDurationSeconds
                                             RoutePlanStore.steps = calculated.steps
                                             RoutePlanStore.maneuvers = calculated.maneuvers
                                             RoutePlanStore.origin = "CURRENT LOCATION"
@@ -1178,7 +1232,7 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
 }
 
 @Composable
-private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, searchLocation: Pair<Double, Double>?) {
+private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, followEnabled: Boolean, tilt3D: Boolean, searchLocation: Pair<Double, Double>?) {
     val context = LocalContext.current
     var pageReady by remember { mutableStateOf(false) }
     var lastSentRoute by remember { mutableStateOf<String?>(null) }
@@ -1188,6 +1242,8 @@ private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, 
     val mapPrefs = remember { context.getSharedPreferences("haulway_settings_v10", Context.MODE_PRIVATE) }
     var lastSentAppearance by remember { mutableStateOf<String?>(null) }
     var lastSentHeadingUp by remember { mutableStateOf<Boolean?>(null) }
+    var lastSentFollowEnabled by remember { mutableStateOf<Boolean?>(null) }
+    var lastSentTilt3D by remember { mutableStateOf<Boolean?>(null) }
     var lastSentSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     AndroidView(
         modifier = Modifier.fillMaxSize().background(Color(0xFF101B24)),
@@ -1302,6 +1358,14 @@ private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, 
                     webView.evaluateJavascript("window.haulwaySetHeadingUp && window.haulwaySetHeadingUp(${if (headingUp) "true" else "false"})", null)
                     lastSentHeadingUp = headingUp
                 }
+                if (lastSentFollowEnabled != followEnabled) {
+                    webView.evaluateJavascript("window.haulwaySetFollowMode && window.haulwaySetFollowMode(${if (followEnabled) "true" else "false"})", null)
+                    lastSentFollowEnabled = followEnabled
+                }
+                if (lastSentTilt3D != tilt3D) {
+                    webView.evaluateJavascript("window.haulwaySetTilt3D && window.haulwaySetTilt3D(${if (tilt3D) "true" else "false"})", null)
+                    lastSentTilt3D = tilt3D
+                }
                 if (searchLocation != null && searchLocation != lastSentSearchLocation) {
                     webView.evaluateJavascript("window.haulwaySearchLocation && window.haulwaySearchLocation(${searchLocation.first},${searchLocation.second})", null)
                     lastSentSearchLocation = searchLocation
@@ -1313,7 +1377,7 @@ private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, 
 
 private val NAVIGATION_MAP_HTML = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#17232b"><link rel="icon" href="data:,"><style>
-*{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100vw;height:100vh;min-height:100%;overflow:hidden;background:#17232b;touch-action:none}#mapscene{position:absolute;inset:0;transform:none;transform-origin:50% 50%;will-change:transform}#tiles{position:absolute;inset:0;overflow:hidden}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:256px;height:256px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#mapstatus{position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;transition:left .22s linear,top .22s linear,transform .18s ease-out;width:20px;height:26px;margin:-13px 0 0 -10px;filter:drop-shadow(0 3px 4px #000d);pointer-events:none;transform-origin:50% 50%}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:24px solid #078ee8;filter:drop-shadow(0 1px 0 #d7f1ff)}.vehicle:after{content:'';position:absolute;left:6px;top:8px;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:12px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
+*{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100vw;height:100vh;min-height:100%;overflow:hidden;background:#17232b;touch-action:none}#mapscene{position:absolute;inset:0;transform:none;transform-origin:50% 50%;will-change:transform}#tiles{position:absolute;inset:0;overflow:hidden}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:256px;height:256px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#mapstatus{position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;width:28px;height:36px;margin:-18px 0 0 -14px;filter:drop-shadow(0 4px 5px #000f);pointer-events:none;transform-origin:50% 50%}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:13px solid transparent;border-right:13px solid transparent;border-bottom:34px solid #078ee8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 2px 0 #00131f)}.vehicle:after{content:'';position:absolute;left:9px;top:10px;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:17px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
 </style></head><body><div id="map"><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg></div><div id="vehicle" class="vehicle" style="display:none"></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© CARTO · © OpenStreetMap data · HAULWAY Dark</div></div>
 <script>
 (function(){'use strict';
@@ -1330,7 +1394,7 @@ const openStreetMapProvider={name:'OpenStreetMap fallback',url:(z,x,y)=>`https:/
 /* CARTO requires its own Basemaps key. Do not request CARTO tiles with an empty key:
    they return HTTP 200 with an API KEY REQUIRED watermark. */
 const providers=CARTO_API_KEY ? [...cartoProviders,openStreetMapProvider] : [openStreetMapProvider];
-let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,autoFollow=true,firstFix=true,headingUp=true,drag=null,failed=0,loaded=0,providerTimer=null;
+let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,targetVehicle=null,vehicleAnimFrom=null,vehicleAnimStarted=0,vehicleAnimationFrame=0,autoFollow=true,firstFix=true,headingUp=true,tilt3D=true,drag=null,failed=0,loaded=0,providerTimer=null;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
 function geoPoint(x,y,z){const n=256*Math.pow(2,z),lon=x/n*360-180,lat=Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI;return{lat,lon};}
@@ -1376,15 +1440,44 @@ function render(){
  finish();drawOverlays();
 }
 function screenPoint(lat,lon){const p=worldPoint(lat,lon,zoom),c=worldPoint(center.lat,center.lon,zoom),s=size();return{x:p.x-c.x+s.w/2,y:p.y-c.y+(autoFollow?s.h*.70:s.h*.50)};}
-function applyMapOrientation(){scene.style.transform='none';scene.style.transformOrigin='50% 50%';scene.style.perspective='none';world.style.transform=world.style.transform||'none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
+function applyMapOrientation(){scene.style.transform=tilt3D&&autoFollow?'perspective(1100px) rotateX(48deg) scale(1.34)':'none';scene.style.transformOrigin='50% 70%';scene.style.perspective='none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
 function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.70}:screenPoint(lastVehicle.lat,lastVehicle.lon);vehicle.style.display='block';vehicle.style.left=p.x+'px';vehicle.style.top=p.y+'px';}applyMapOrientation(); }
 function setCenter(lat,lon,follow=false){center={lat:clamp(lat,-85,85),lon:lon};if(follow)autoFollow=true;render();}
 window.haulwaySetZoom=function(offset){const next=clamp(12+Number(offset||0),3,19);if(next!==zoom){zoom=next;scheduleRender();}};
 window.haulwaySetRoute=function(json){try{const raw=JSON.parse(json);routeCoords=raw.map(c=>[Number(c[1]),Number(c[0])]).filter(c=>Number.isFinite(c[0])&&Number.isFinite(c[1]));if(routeCoords.length<2)throw Error('Route geometry empty');if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);}else{const lats=routeCoords.map(c=>c[0]),lons=routeCoords.map(c=>c[1]);center={lat:(Math.min(...lats)+Math.max(...lats))/2,lon:(Math.min(...lons)+Math.max(...lons))/2};const span=Math.max(Math.abs(Math.max(...lats)-Math.min(...lats)),Math.abs(Math.max(...lons)-Math.min(...lons)));zoom=clamp(Math.floor(Math.log2(360/Math.max(span,.002)))-1,5,16);}scheduleRender();}catch(e){showStatus('ROUTE DISPLAY ERROR');console.error('Route error '+e);}};
 window.haulwayClearRoute=function(){routeCoords=[];center={lat:53.4808,lon:-2.2426};zoom=12;autoFollow=false;scheduleRender();};
-window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;lastVehicle={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy:accuracy};if(autoFollow){center={lat:clamp(lat,-85,85),lon:lon};if(firstFix){zoom=Math.max(zoom,16);firstFix=false;headingUp=true;scheduleRender();drawOverlays();return;}const base=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),current=worldPoint(center.lat,center.lon,zoom),dx=base.x-current.x,dy=base.y-current.y;if(!drag){world.style.transform='translate('+dx+'px,'+dy+'px)';const viewport=size();if(Math.abs(dx)>viewport.w*0.65||Math.abs(dy)>viewport.h*0.65)scheduleRender();}}drawOverlays();};
+function animateVehicleFrame(now){
+ if(!targetVehicle)return;
+ const duration=900,progress=clamp((now-vehicleAnimStarted)/duration,0,1),from=vehicleAnimFrom||targetVehicle;
+ const lonDelta=((targetVehicle.lon-from.lon+540)%360)-180;
+ let bearing=targetVehicle.bearing;
+ if(Number.isFinite(from.bearing)&&Number.isFinite(targetVehicle.bearing)){const d=((targetVehicle.bearing-from.bearing+540)%360)-180;bearing=(from.bearing+d*progress+360)%360;}
+ lastVehicle={lat:from.lat+(targetVehicle.lat-from.lat)*progress,lon:from.lon+lonDelta*progress,bearing,accuracy:targetVehicle.accuracy};
+ if(autoFollow){
+   center={lat:lastVehicle.lat,lon:lastVehicle.lon};
+   const base=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),current=worldPoint(center.lat,center.lon,zoom),dx=base.x-current.x,dy=base.y-current.y;
+   if(!drag){world.style.transform='translate3d('+dx+'px,'+dy+'px,0)';}
+ }
+ drawOverlays();
+ if(progress<1){vehicleAnimationFrame=requestAnimationFrame(animateVehicleFrame);}
+ else{vehicleAnimationFrame=0;vehicleAnimFrom=targetVehicle;}
+}
+window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){
+ if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
+ const next={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy};
+ if(!lastVehicle){
+   lastVehicle=next;targetVehicle=next;vehicleAnimFrom=next;
+   if(autoFollow){center={lat:clamp(lat,-85,85),lon};if(firstFix){zoom=Math.max(zoom,16);firstFix=false;}}
+   scheduleRender();drawOverlays();return;
+ }
+ if(vehicleAnimationFrame)cancelAnimationFrame(vehicleAnimationFrame);
+ vehicleAnimFrom=lastVehicle;targetVehicle=next;vehicleAnimStarted=performance.now();
+ vehicleAnimationFrame=requestAnimationFrame(animateVehicleFrame);
+};
 window.haulwaySearchLocation=function(lat,lon){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;autoFollow=false;center={lat:clamp(lat,-85,85),lon:lon};zoom=Math.max(zoom,16);scheduleRender();};
-window.haulwayFollowRequest=function(){autoFollow=true;if(lastVehicle){const oldZoom=zoom;center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);if(zoom!==oldZoom){scheduleRender();}else{const a=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),b=worldPoint(center.lat,center.lon,zoom);world.style.transform='translate('+(a.x-b.x)+'px,'+(a.y-b.y)+'px)';drawOverlays();}}};
+window.haulwayFollowRequest=function(){autoFollow=true;if(lastVehicle){const oldZoom=zoom;center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);if(zoom!==oldZoom){scheduleRender();}else{const a=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),b=worldPoint(center.lat,center.lon,zoom);world.style.transform='translate3d('+(a.x-b.x)+'px,'+(a.y-b.y)+'px,0)';drawOverlays();}}applyMapOrientation();};
+window.haulwaySetFollowMode=function(enabled){autoFollow=!!enabled;if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);scheduleRender();}else{drawOverlays();}applyMapOrientation();};
+window.haulwaySetTilt3D=function(enabled){tilt3D=!!enabled;applyMapOrientation();};
 window.haulwayApplyAppearance=function(mode,style){
  if(!CARTO_API_KEY){console.warn('Map appearance saved; CARTO key is not present in this APK');return;}
  const effective=(mode==='Auto')?(new Date().getHours()>=19||new Date().getHours()<7?'Dark Matter':'Voyager'):((mode==='Night')?'Dark Matter':'Positron');
@@ -1417,7 +1510,7 @@ function commitPan(){
 root.addEventListener('pointerdown',e=>{
  if(panFrame){cancelAnimationFrame(panFrame);panFrame=0;}
  drag={startX:e.clientX,startY:e.clientY};panOffset={x:0,y:0};panVelocity={x:0,y:0};
- lastPointer={x:e.clientX,y:e.clientY,t:performance.now()};root.setPointerCapture(e.pointerId);autoFollow=false;
+ lastPointer={x:e.clientX,y:e.clientY,t:performance.now()};root.setPointerCapture(e.pointerId);autoFollow=false;applyMapOrientation();
 });
 root.addEventListener('pointermove',e=>{
  if(!drag)return;
@@ -1840,6 +1933,10 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
                                 val calculated = calculateRoadRoute(addressStops, strategy, context)
                                 RoutePlanStore.coordinatesJson = calculated.coordinatesJson
                                 RoutePlanStore.summary = "${calculated.distanceText} · ${durationWithBreaks(calculated.durationText, totalBreakMinutes)}"
+                                RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
+                                RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds + totalBreakMinutes * 60.0
+                                remainingDistanceMetres = calculated.totalDistanceMetres
+                                remainingDurationSeconds = RoutePlanStore.totalDurationSeconds
                                 RoutePlanStore.steps = calculated.steps
                                 RoutePlanStore.maneuvers = calculated.maneuvers
                                 RoutePlanStore.origin = stops.first(); RoutePlanStore.destination = stops.last()
