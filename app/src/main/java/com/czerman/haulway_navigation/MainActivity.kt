@@ -1161,7 +1161,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                             RoutePlanStore.summary = "${calculated.distanceText} · ${calculated.durationText}"
                                             RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
                                             RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
-                                            remainingDistanceMetres = calculated.totalDistanceMetres
+                remainingDistanceMetres = calculated.totalDistanceMetres
                                             remainingDurationSeconds = calculated.totalDurationSeconds
                                             RoutePlanStore.steps = calculated.steps
                                             RoutePlanStore.maneuvers = calculated.maneuvers
@@ -1935,8 +1935,6 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
                                 RoutePlanStore.summary = "${calculated.distanceText} · ${durationWithBreaks(calculated.durationText, totalBreakMinutes)}"
                                 RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
                                 RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds + totalBreakMinutes * 60.0
-                                remainingDistanceMetres = calculated.totalDistanceMetres
-                                remainingDurationSeconds = RoutePlanStore.totalDurationSeconds
                                 RoutePlanStore.steps = calculated.steps
                                 RoutePlanStore.maneuvers = calculated.maneuvers
                                 RoutePlanStore.origin = stops.first(); RoutePlanStore.destination = stops.last()
