@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import android.os.Bundle
+import android.os.Looper
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -229,7 +230,8 @@ private fun resolveHaulwayCurrentLocation(context: Context): Pair<Double, Double
 private suspend fun calculateRoadRoute(
     locations: List<String>,
     strategy: String,
-    context: Context
+    context: Context,
+    liveOrigin: Pair<Double, Double>? = null
 ): RouteResult = withContext(Dispatchers.IO) {
     require(locations.size >= 2) { "Add at least a start and destination" }
     val apiKey = BuildConfig.ORS_API_KEY.trim()
@@ -292,7 +294,7 @@ private suspend fun calculateRoadRoute(
     val points = mutableListOf<Pair<Double, Double>>()
     locations.forEachIndexed { index, place ->
         if (place.equals("CURRENT LOCATION", ignoreCase = true)) {
-            points.add(resolveHaulwayCurrentLocation(context))
+            points.add(liveOrigin ?: resolveHaulwayCurrentLocation(context))
         } else {
             if (index > 0) kotlinx.coroutines.delay(1100) // Public Nominatim usage policy.
             points.add(geocode(place))
@@ -603,6 +605,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var distanceToManeuver by remember { mutableStateOf<Double?>(null) }
     var offRoute by remember { mutableStateOf(false) }
     var offRouteReadings by remember { mutableIntStateOf(0) }
+    var rerouteInProgress by remember { mutableStateOf(false) }
+    var lastRerouteAt by remember { mutableLongStateOf(0L) }
     var speechEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     var speechReady by remember { mutableStateOf(false) }
     var lastSpokenStage by remember { mutableStateOf("") }
@@ -649,6 +653,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         val displayRotation = (appContext.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.rotation
         var latestGpsSpeedMps = 0f
+        var smoothedSpeedMph: Double? = null
+        var lastAcceptedLocation: android.location.Location? = null
         val orientationListener = object : SensorEventListener {
             private val rotationMatrix = FloatArray(9)
             private val screenRotationMatrix = FloatArray(9)
@@ -670,19 +676,69 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
         }
         rotationSensor?.let { sensorManager.registerListener(orientationListener, it, SensorManager.SENSOR_DELAY_UI) }
+        val gpsProviderEnabled = fineGranted && try {
+            locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
+        } catch (_: Exception) { false }
         val listener = object : android.location.LocationListener {
             override fun onLocationChanged(location: android.location.Location) {
-                latestGpsSpeedMps = if (location.hasSpeed()) location.speed else 0f
-                liveSpeedMph = if (location.hasSpeed()) (location.speed * 2.236936).coerceAtLeast(0.0) else null
+                // When GNSS is available, never let a coarse network fix overwrite it.
+                // Network location is only a fallback when the device has no GPS provider.
+                if (gpsProviderEnabled && location.provider != android.location.LocationManager.GPS_PROVIDER) return
+                val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+                if (ageMs > 6_000L) return
+                val accuracy = if (location.hasAccuracy()) location.accuracy else 999f
+                if (accuracy > 50f) { liveAccuracy = accuracy; return }
+                val previous = lastAcceptedLocation
+                if (previous != null) {
+                    val elapsed = ((location.time - previous.time).coerceAtLeast(1L)) / 1000.0
+                    val jumpSpeed = distanceMetres(previous.latitude, previous.longitude, location.latitude, location.longitude) / elapsed
+                    if (elapsed < 8.0 && jumpSpeed > 55.0) return
+                }
+                lastAcceptedLocation = android.location.Location(location)
+                latestGpsSpeedMps = if (location.hasSpeed()) location.speed else if (previous != null) {
+                    (distanceMetres(previous.latitude, previous.longitude, location.latitude, location.longitude) /
+                        ((location.time - previous.time).coerceAtLeast(1L) / 1000.0)).toFloat().coerceIn(0f, 55f)
+                } else 0f
+                val rawSpeedMph = (latestGpsSpeedMps * 2.236936).coerceAtLeast(0.0)
+                smoothedSpeedMph = smoothedSpeedMph?.let { it * 0.65 + rawSpeedMph * 0.35 } ?: rawSpeedMph
+                liveSpeedMph = smoothedSpeedMph
                 liveLatitude = location.latitude
                 liveLongitude = location.longitude
                 if (location.hasBearing() && latestGpsSpeedMps >= 1.5f) liveBearing = location.bearing
-                liveAccuracy = if (location.hasAccuracy()) location.accuracy else null
+                liveAccuracy = accuracy
                 val distanceFromRoute = distanceToRouteMetres(location.latitude, location.longitude, RoutePlanStore.coordinatesJson)
-                if (distanceFromRoute != null && location.accuracy <= 60f) {
-                    if (distanceFromRoute > 90.0) offRouteReadings++ else offRouteReadings = 0
+                if (distanceFromRoute != null && accuracy <= 45f) {
+                    if (distanceFromRoute > maxOf(75.0, accuracy.toDouble() * 1.8)) offRouteReadings++ else offRouteReadings = 0
                     if (offRouteReadings >= 3) offRoute = true
-                    if (distanceFromRoute < 45.0) offRoute = false
+                    if (distanceFromRoute < maxOf(35.0, accuracy.toDouble())) { offRoute = false; offRouteReadings = 0 }
+                    // Recalculate from the live position to the saved destination. Never wait
+                    // for the driver to return to the original route. Throttle API requests.
+                    val now = System.currentTimeMillis()
+                    if (offRoute && !rerouteInProgress && now - lastRerouteAt > 20_000L &&
+                        RoutePlanStore.destination.isNotBlank() && BuildConfig.ORS_API_KEY.isNotBlank()) {
+                        rerouteInProgress = true
+                        lastRerouteAt = now
+                        mapSearchScope.launch {
+                            try {
+                                val updated = calculateRoadRoute(
+                                    listOf("CURRENT LOCATION", RoutePlanStore.destination),
+                                    "FASTEST", appContext, location.longitude to location.latitude
+                                )
+                                RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                RoutePlanStore.steps = updated.steps
+                                RoutePlanStore.maneuvers = updated.maneuvers
+                                RoutePlanStore.origin = "CURRENT LOCATION"
+                                activeManeuverIndex = 0
+                                offRoute = false
+                                offRouteReadings = 0
+                                lastSpokenStage = ""
+                            } catch (error: Exception) {
+                                // Keep the warning visible and allow a later retry.
+                                lastRerouteAt = System.currentTimeMillis() - 15_000L
+                            } finally { rerouteInProgress = false }
+                        }
+                    }
                 } else {
                     offRouteReadings = 0
                     if (RoutePlanStore.coordinatesJson == null) offRoute = false
@@ -737,15 +793,21 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         if (fineGranted || coarseGranted) {
             try {
                 val providersToUse = buildList {
-                    if (fineGranted && locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) add(android.location.LocationManager.GPS_PROVIDER)
-                    if (locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) add(android.location.LocationManager.NETWORK_PROVIDER)
+                    if (gpsProviderEnabled) {
+                        add(android.location.LocationManager.GPS_PROVIDER)
+                    } else if (locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+                        // Coarse network positioning is explicitly a fallback, not a competing source.
+                        add(android.location.LocationManager.NETWORK_PROVIDER)
+                    }
                 }
-                // Seed the map immediately from the freshest cached fix while waiting for a live GPS update.
+                // Only seed from a fresh cached fix; never centre the truck on a minutes-old position.
                 val cached = providersToUse.mapNotNull { provider -> try { locationManager.getLastKnownLocation(provider) } catch (_: SecurityException) { null } }
+                    .filter { System.currentTimeMillis() - it.time in 0..30_000L }
                     .maxByOrNull { it.time }
-                if (cached != null && System.currentTimeMillis() - cached.time < 10 * 60 * 1000L) listener.onLocationChanged(cached)
+                if (cached != null) listener.onLocationChanged(cached)
                 providersToUse.forEach { provider ->
-                    locationManager.requestLocationUpdates(provider, 1000L, 0f, listener)
+                    val isGps = provider == android.location.LocationManager.GPS_PROVIDER
+                    locationManager.requestLocationUpdates(provider, if (isGps) 1000L else 3000L, if (isGps) 0.5f else 10f, listener, Looper.getMainLooper())
                 }
             } catch (_: SecurityException) { liveSpeedMph = null }
         }
@@ -768,7 +830,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
                     // Keep SEARCH below the manoeuvre banner so it is never hidden behind it.
-                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 108.dp).size(44.dp).clickable {
+                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 68.dp).size(44.dp).clickable {
                         showMapSearch = true
                         mapSearchError = null
                         selectedMapSearchLocation = null
@@ -791,30 +853,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Warning, null, tint = White, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("OFF ROUTE — stop safely and recalculate", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                // Next manoeuvre card: never show a fabricated distance or road number.
-                Surface(
-                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp).widthIn(min = 250.dp, max = 390.dp),
-                    shape = RoundedCornerShape(8.dp), color = Color(0xF20B1B29), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00A8E8))
-                ) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.TurnRight, null, tint = White, modifier = Modifier.size(38.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            val activeManeuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)
-                            Text(
-                                if (activeManeuver != null && distanceToManeuver != null) formatNavigationDistance(distanceToManeuver!!) else "—",
-                                color = White, fontSize = 23.sp, fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                activeManeuver?.let { if (it.roadName.isNotBlank()) "${it.label} · ${it.roadName}" else it.label }
-                                    ?: "Calculate a route and wait for GPS",
-                                color = White, fontSize = 14.sp, maxLines = 2
-                            )
+                            Text(if (rerouteInProgress) "OFF ROUTE — finding a new HGV route…" else "OFF ROUTE — recalculation will retry automatically", color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -923,8 +962,21 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(4.dp), maxLines = 2
                 )
-                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let {
-                    Text(it, color = Color(0xFFB9C8D3), fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let { summary ->
+                    val parts = summary.split(" · ")
+                    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(parts.getOrElse(0) { "—" }, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Spacer(Modifier.width(5.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(parts.getOrElse(1) { "—" }, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -968,7 +1020,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     }
 
     if (showMapSearch) {
-        // Search-as-you-type: debounce input and refresh address suggestions automatically.
+        // Global search-as-you-type: debounce input and refresh address / place suggestions automatically.
         LaunchedEffect(mapSearchText, showMapSearch) {
             val query = mapSearchText.trim()
             if (query.length < 3) {
@@ -983,7 +1035,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     val results = searchMapPlaces(query, liveLatitude, liveLongitude)
                     if (mapSearchText.trim() == query) {
                         mapSearchResults = results
-                        mapSearchError = if (results.isEmpty()) "No matching UK addresses found" else null
+                        mapSearchError = if (results.isEmpty()) "No matching addresses found" else null
                     }
                 } catch (e: Exception) {
                     if (mapSearchText.trim() == query) mapSearchError = e.localizedMessage ?: "Address search failed"
@@ -1022,7 +1074,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                 mapSearchScope.launch {
                                     try {
                                         mapSearchResults = searchMapPlaces(mapSearchText.trim(), liveLatitude, liveLongitude)
-                                        if (mapSearchResults.isEmpty()) mapSearchError = "No matching UK addresses found"
+                                        if (mapSearchResults.isEmpty()) mapSearchError = "No matching addresses found"
                                     } catch (e: Exception) { mapSearchError = e.localizedMessage ?: "Address search failed" }
                                     finally { mapSearchLoading = false }
                                 }
@@ -1261,8 +1313,8 @@ private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, 
 
 private val NAVIGATION_MAP_HTML = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#17232b"><link rel="icon" href="data:,"><style>
-*{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100vw;height:100vh;min-height:100%;overflow:hidden;background:#17232b;touch-action:none}#mapscene{position:absolute;inset:0;transform:perspective(1100px) rotateX(9deg) scale(1.18,1.24);transform-origin:50% 50%;will-change:transform;transition:transform .25s ease-out}#tiles{position:absolute;inset:0;overflow:hidden}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:256px;height:256px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#mapstatus{position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;transition:transform .22s ease-out;width:20px;height:26px;margin:-13px 0 0 -10px;filter:drop-shadow(0 3px 4px #000d);pointer-events:none;transform-origin:50% 50%}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:24px solid #078ee8;filter:drop-shadow(0 1px 0 #d7f1ff)}.vehicle:after{content:'';position:absolute;left:6px;top:8px;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:12px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
-</style></head><body><div id="map"><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><polyline id="travelled" fill="none" stroke="#91a4b2" stroke-width="5" stroke-linecap="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg><div id="vehicle" class="vehicle" style="display:none"></div></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© CARTO · © OpenStreetMap data · HAULWAY Dark</div></div>
+*{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100vw;height:100vh;min-height:100%;overflow:hidden;background:#17232b;touch-action:none}#mapscene{position:absolute;inset:0;transform:none;transform-origin:50% 50%;will-change:transform}#tiles{position:absolute;inset:0;overflow:hidden}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:256px;height:256px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#mapstatus{position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;transition:left .22s linear,top .22s linear,transform .18s ease-out;width:20px;height:26px;margin:-13px 0 0 -10px;filter:drop-shadow(0 3px 4px #000d);pointer-events:none;transform-origin:50% 50%}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:24px solid #078ee8;filter:drop-shadow(0 1px 0 #d7f1ff)}.vehicle:after{content:'';position:absolute;left:6px;top:8px;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:12px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
+</style></head><body><div id="map"><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg></div><div id="vehicle" class="vehicle" style="display:none"></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© CARTO · © OpenStreetMap data · HAULWAY Dark</div></div>
 <script>
 (function(){'use strict';
 const root=document.getElementById('map'),scene=document.getElementById('mapscene'),world=document.getElementById('tileworld'),status=document.getElementById('mapstatus'),overlay=document.getElementById('overlay'),vehicle=document.getElementById('vehicle');
@@ -1278,7 +1330,7 @@ const openStreetMapProvider={name:'OpenStreetMap fallback',url:(z,x,y)=>`https:/
 /* CARTO requires its own Basemaps key. Do not request CARTO tiles with an empty key:
    they return HTTP 200 with an API KEY REQUIRED watermark. */
 const providers=CARTO_API_KEY ? [...cartoProviders,openStreetMapProvider] : [openStreetMapProvider];
-let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],routeCoords=[],lastVehicle=null,autoFollow=true,firstFix=true,headingUp=true,drag=null,failed=0,loaded=0,providerTimer=null;
+let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,autoFollow=true,firstFix=true,headingUp=true,drag=null,failed=0,loaded=0,providerTimer=null;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
 function geoPoint(x,y,z){const n=256*Math.pow(2,z),lon=x/n*360-180,lat=Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI;return{lat,lon};}
@@ -1289,23 +1341,50 @@ function showStatus(t){status.textContent=t;status.style.display='block';}
 window.haulwayResize=function(){const s=size();if(s.w>0&&s.h>0){const key=s.w+'x'+s.h;if(key!==lastRenderSize){lastRenderSize=key;render();}}};
 const mapResizeObserver=new ResizeObserver(()=>window.haulwayResize());
 mapResizeObserver.observe(root);
-function render(){const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;const previousTiles=tiles.slice();renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';const nextTiles=[];tiles=nextTiles;failed=0;loaded=0;
+function render(){
+ const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
+ renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
+ const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
  const x0=Math.floor(left/256)-1,y0=Math.floor(top/256)-1,x1=Math.floor((left+sz.w)/256)+1,y1=Math.floor((top+sz.h)/256)+1,max=Math.pow(2,zoom);
- for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){if(y<0||y>=max)continue;let xx=((x%max)+max)%max;const im=document.createElement('img');im.className='tile';im.draggable=false;im.style.left=Math.round(x*256-left)+'px';im.style.top=Math.round(y*256-top)+'px';im.style.zIndex='2';im.src=providers[provider].url(zoom,xx,y);im.onload=()=>{if(generation!==renderGeneration)return;loaded++;if(loaded+failed>=nextTiles.length){status.style.display='none';previousTiles.forEach(old=>old.remove());console.log('Map tile layer ready: provider='+providers[provider].name+', '+loaded+' loaded, '+failed+' failed; native='+im.naturalWidth+'x'+im.naturalHeight+', dpr='+window.devicePixelRatio);}};im.onerror=()=>{if(generation!==renderGeneration)return;failed++;im.classList.add('failed');console.error('Tile image failed: '+im.src);if(loaded===0&&failed>=nextTiles.length){if(provider<providers.length-1){provider++;console.warn('All tiles failed; switching to '+providers[provider].name);showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();return;}showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');console.error('All map tile providers failed');}else if(loaded+failed>=nextTiles.length){status.style.display='none';previousTiles.forEach(old=>old.remove());}};world.appendChild(im);nextTiles.push(im);}
- previousTiles.forEach(old=>{old.style.zIndex='1';});
- if(providerTimer)clearTimeout(providerTimer);providerTimer=setTimeout(()=>{if(loaded===0&&provider<providers.length-1){provider++;console.warn('Map tile timeout; switching provider '+providers[provider].name);showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();}else if(loaded===0){showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');console.error('All tile providers failed');}},9000);
- drawOverlays();
+ function finish(){if(generation!==renderGeneration||pending>0)return;
+   if(failedNow>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();return;}
+   if(loadedNow>0){status.style.display='none';}
+   // Retain only visible tiles after the replacement set is ready. This avoids blank frames.
+   for(const [key,node] of tileCache){if(!wanted.has(key)){node.remove();tileCache.delete(key);}}
+   if(loadedNow===0&&failedNow>0)showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');
+   console.log('Map tile layer ready: provider='+providers[provider].name+', '+loadedNow+' loaded, '+failedNow+' failed; cached='+tileCache.size);
+ }
+ for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+   if(y<0||y>=max)continue;const xx=((x%max)+max)%max,key=provider+'|'+zoom+'|'+xx+'|'+y;wanted.add(key);
+   let im=tileCache.get(key),isNew=!im;
+   if(!im){im=document.createElement('img');im.className='tile';im.draggable=false;im.dataset.tileKey=key;tileCache.set(key,im);}
+   if(im.complete&&im.naturalWidth>0){loadedNow++;}
+   else if(im.complete&&im.naturalWidth===0&&im.src){failedNow++;}
+   else {
+     pending++;
+     im.onload=()=>{if(generation!==renderGeneration)return;pending--;loadedNow++;im.classList.remove('failed');finish();};
+     im.onerror=()=>{if(generation!==renderGeneration)return;pending--;failedNow++;im.classList.add('failed');finish();};
+   }
+   im.style.left=Math.round(x*256-left)+'px';im.style.top=Math.round(y*256-top)+'px';im.style.zIndex='2';
+   if(im.parentNode!==world)world.appendChild(im);
+   if(isNew)im.src=providers[provider].url(zoom,xx,y);
+   nextTiles.push(im);
+ }
+ tiles=nextTiles;
+ if(providerTimer)clearTimeout(providerTimer);
+ providerTimer=setTimeout(()=>{if(generation!==renderGeneration)return;if(pending>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();}else if(loadedNow===0){showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');}},9000);
+ finish();drawOverlays();
 }
 function screenPoint(lat,lon){const p=worldPoint(lat,lon,zoom),c=worldPoint(center.lat,center.lon,zoom),s=size();return{x:p.x-c.x+s.w/2,y:p.y-c.y+(autoFollow?s.h*.70:s.h*.50)};}
-function applyMapOrientation(){scene.style.transform='perspective(1100px) rotateX(9deg) scale(1.18,1.24)';scene.style.transformOrigin='50% 50%';scene.style.perspective='1100px';world.style.transform=world.style.transform||'none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
-function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route','travelled'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.70}:screenPoint(lastVehicle.lat,lastVehicle.lon);vehicle.style.display='block';vehicle.style.left=p.x+'px';vehicle.style.top=p.y+'px';}applyMapOrientation(); }
+function applyMapOrientation(){scene.style.transform='none';scene.style.transformOrigin='50% 50%';scene.style.perspective='none';world.style.transform=world.style.transform||'none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
+function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.70}:screenPoint(lastVehicle.lat,lastVehicle.lon);vehicle.style.display='block';vehicle.style.left=p.x+'px';vehicle.style.top=p.y+'px';}applyMapOrientation(); }
 function setCenter(lat,lon,follow=false){center={lat:clamp(lat,-85,85),lon:lon};if(follow)autoFollow=true;render();}
 window.haulwaySetZoom=function(offset){const next=clamp(12+Number(offset||0),3,19);if(next!==zoom){zoom=next;scheduleRender();}};
-window.haulwaySetRoute=function(json){try{const raw=JSON.parse(json);routeCoords=raw.map(c=>[Number(c[1]),Number(c[0])]).filter(c=>Number.isFinite(c[0])&&Number.isFinite(c[1]));if(routeCoords.length<2)throw Error('Route geometry empty');const lats=routeCoords.map(c=>c[0]),lons=routeCoords.map(c=>c[1]);center={lat:(Math.min(...lats)+Math.max(...lats))/2,lon:(Math.min(...lons)+Math.max(...lons))/2};const span=Math.max(Math.abs(Math.max(...lats)-Math.min(...lats)),Math.abs(Math.max(...lons)-Math.min(...lons)));zoom=clamp(Math.floor(Math.log2(360/Math.max(span,.002)))-1,5,16);scheduleRender();}catch(e){showStatus('ROUTE DISPLAY ERROR');console.error('Route error '+e);}};
+window.haulwaySetRoute=function(json){try{const raw=JSON.parse(json);routeCoords=raw.map(c=>[Number(c[1]),Number(c[0])]).filter(c=>Number.isFinite(c[0])&&Number.isFinite(c[1]));if(routeCoords.length<2)throw Error('Route geometry empty');if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);}else{const lats=routeCoords.map(c=>c[0]),lons=routeCoords.map(c=>c[1]);center={lat:(Math.min(...lats)+Math.max(...lats))/2,lon:(Math.min(...lons)+Math.max(...lons))/2};const span=Math.max(Math.abs(Math.max(...lats)-Math.min(...lats)),Math.abs(Math.max(...lons)-Math.min(...lons)));zoom=clamp(Math.floor(Math.log2(360/Math.max(span,.002)))-1,5,16);}scheduleRender();}catch(e){showStatus('ROUTE DISPLAY ERROR');console.error('Route error '+e);}};
 window.haulwayClearRoute=function(){routeCoords=[];center={lat:53.4808,lon:-2.2426};zoom=12;autoFollow=false;scheduleRender();};
-window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;lastVehicle={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy:accuracy};if(autoFollow){center={lat:clamp(lat,-85,85),lon:lon};if(firstFix){zoom=Math.max(zoom,17);firstFix=false;headingUp=true;scheduleRender();drawOverlays();return;}const base=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),current=worldPoint(center.lat,center.lon,zoom),dx=base.x-current.x,dy=base.y-current.y;if(!drag){world.style.transform='translate('+dx+'px,'+dy+'px)';const viewport=size();if(Math.abs(dx)>viewport.w*0.65||Math.abs(dy)>viewport.h*0.65)scheduleRender();}}drawOverlays();};
-window.haulwaySearchLocation=function(lat,lon){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;autoFollow=false;center={lat:clamp(lat,-85,85),lon:lon};zoom=Math.max(zoom,17);scheduleRender();};
-window.haulwayFollowRequest=function(){autoFollow=true;if(lastVehicle){const oldZoom=zoom;center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,17);if(zoom!==oldZoom){scheduleRender();}else{const a=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),b=worldPoint(center.lat,center.lon,zoom);world.style.transform='translate('+(a.x-b.x)+'px,'+(a.y-b.y)+'px)';drawOverlays();}}};
+window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;lastVehicle={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy:accuracy};if(autoFollow){center={lat:clamp(lat,-85,85),lon:lon};if(firstFix){zoom=Math.max(zoom,16);firstFix=false;headingUp=true;scheduleRender();drawOverlays();return;}const base=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),current=worldPoint(center.lat,center.lon,zoom),dx=base.x-current.x,dy=base.y-current.y;if(!drag){world.style.transform='translate('+dx+'px,'+dy+'px)';const viewport=size();if(Math.abs(dx)>viewport.w*0.65||Math.abs(dy)>viewport.h*0.65)scheduleRender();}}drawOverlays();};
+window.haulwaySearchLocation=function(lat,lon){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;autoFollow=false;center={lat:clamp(lat,-85,85),lon:lon};zoom=Math.max(zoom,16);scheduleRender();};
+window.haulwayFollowRequest=function(){autoFollow=true;if(lastVehicle){const oldZoom=zoom;center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);if(zoom!==oldZoom){scheduleRender();}else{const a=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),b=worldPoint(center.lat,center.lon,zoom);world.style.transform='translate('+(a.x-b.x)+'px,'+(a.y-b.y)+'px)';drawOverlays();}}};
 window.haulwayApplyAppearance=function(mode,style){
  if(!CARTO_API_KEY){console.warn('Map appearance saved; CARTO key is not present in this APK');return;}
  const effective=(mode==='Auto')?(new Date().getHours()>=19||new Date().getHours()<7?'Dark Matter':'Voyager'):((mode==='Night')?'Dark Matter':'Positron');
@@ -1765,9 +1844,6 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
                                 RoutePlanStore.maneuvers = calculated.maneuvers
                                 RoutePlanStore.origin = stops.first(); RoutePlanStore.destination = stops.last()
                                 result = calculated
-                                // Start navigation immediately after a successful route calculation.
-                                // The driver should not need to tap Start a second time.
-                                onRouteReady()
                             } catch (e: Exception) { error = e.localizedMessage ?: "Could not calculate route" }
                             finally { loading = false }
                         }
@@ -1902,8 +1978,6 @@ private suspend fun searchMapPlaces(
             val lon = coordinates.optDouble(0, Double.NaN)
             val lat = coordinates.optDouble(1, Double.NaN)
             val props = feature.optJSONObject("properties") ?: org.json.JSONObject()
-            val countryCode = props.optString("countrycode", "").lowercase(Locale.UK)
-            if (countryCode.isNotBlank() && countryCode != "gb") return@mapNotNull null
             val parts = listOf(
                 props.optString("housenumber"), props.optString("name"), props.optString("street"),
                 props.optString("district"), props.optString("city"), props.optString("county"),

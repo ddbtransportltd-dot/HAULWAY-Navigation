@@ -42,9 +42,9 @@ android {
     defaultConfig {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 37
+        versionCode = 2
+        versionName = "1.1.0-vision11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
