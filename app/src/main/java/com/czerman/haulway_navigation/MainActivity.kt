@@ -788,6 +788,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var mapSearchError by remember { mutableStateOf<String?>(null) }
     var selectedMapSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var roadPreviewPlace by remember { mutableStateOf<MapSearchResult?>(null) }
+    var showStreetView by remember { mutableStateOf(false) }
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
     var followEnabled by remember { mutableStateOf(true) }
@@ -1367,45 +1368,17 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             mapSearchResults.forEach { place ->
                                 Surface(Modifier.fillMaxWidth().clickable {
-                                    // Selecting a map-search suggestion must calculate a real HGV route,
-                                    // not merely move the map camera to the searched coordinate.
-                                    mapSearchLoading = true
-                                    mapSearchError = null
-                                    mapSearchScope.launch {
-                                        try {
-                                            check(liveLatitude != null && liveLongitude != null) {
-                                                "GPS position is not ready. Wait for the blue vehicle marker, then select the address again."
-                                            }
-                                            val calculated = calculateRoadRoute(
-                                                listOf("CURRENT LOCATION", place.name),
-                                                "FASTEST",
-                                                appContext
-                                            )
-                                            RoutePlanStore.coordinatesJson = calculated.coordinatesJson
-                                            RoutePlanStore.summary = "${calculated.distanceText} · ${calculated.durationText}"
-                                            RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
-                                            RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
-                remainingDistanceMetres = calculated.totalDistanceMetres
-                                            remainingDurationSeconds = calculated.totalDurationSeconds
-                                            RoutePlanStore.steps = calculated.steps
-                                            RoutePlanStore.maneuvers = calculated.maneuvers
-                                            RoutePlanStore.origin = "CURRENT LOCATION"
-                                            RoutePlanStore.destination = place.name
-                                            // The route renderer frames the complete route itself.
-                                            selectedMapSearchLocation = null
-                                            mapSearchResults = emptyList()
-                                            showMapSearch = false
-                                        } catch (e: Exception) {
-                                            mapSearchError = e.localizedMessage ?: "Could not calculate HGV route"
-                                        } finally {
-                                            mapSearchLoading = false
-                                        }
-                                    }
+                                    // Choosing an autocomplete result opens the location card first.
+                                    // Route calculation is deliberately reserved for the GO action.
+                                    roadPreviewPlace = place
+                                    mapSearchResults = emptyList()
+                                    showMapSearch = false
                                 }, color = Color(0xFF26333D), shape = RoundedCornerShape(7.dp)) {
-                                    Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f).padding(vertical = 6.dp))
-                                        Text("ROAD PREVIEW", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable { roadPreviewPlace = place }.padding(8.dp))
+                                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.LocationOn, null, tint = Color(0xFF70C9FF), modifier = Modifier.size(19.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                        Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF70C9FF))
                                     }
                                 }
                             }
@@ -1418,6 +1391,158 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 }
             }
             }
+        }
+    }
+
+    roadPreviewPlace?.let { place ->
+        Dialog(onDismissRequest = { roadPreviewPlace = null; showStreetView = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(Modifier.fillMaxSize().background(Color(0x55000000)), contentAlignment = Alignment.Center) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.56f).widthIn(min = 310.dp, max = 570.dp),
+                    color = Color(0xF20E1926), shape = RoundedCornerShape(22.dp),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF168FE8)),
+                    shadowElevation = 18.dp
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(Modifier.size(78.dp), shape = RoundedCornerShape(10.dp), color = Color(0xFF203A50)) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Home, null, tint = Color(0xFF8CCFFF), modifier = Modifier.size(38.dp))
+                                    Icon(Icons.Default.LocationOn, null, tint = Color(0xFFFFA13A), modifier = Modifier.align(Alignment.BottomEnd).padding(5.dp).size(21.dp))
+                                }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Icon(Icons.Default.LocationOn, null, tint = Color(0xFF078FE8), modifier = Modifier.size(24.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(place.name.substringBefore(",").ifBlank { place.name }, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+                                Text(place.name.substringAfter(",", "").trim(), color = Color(0xFFD0DCE6), fontSize = 13.sp, maxLines = 3)
+                            }
+                            Icon(Icons.Default.Close, "Close", tint = Color(0xFFDCE7EF),
+                                modifier = Modifier.size(30.dp).clickable { roadPreviewPlace = null; showStreetView = false })
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            LocationActionTile("ZAPISZ", "My Places", Icons.Default.Bookmark, Modifier.weight(1f)) {
+                                val prefs = appContext.getSharedPreferences("haulway_my_places", Context.MODE_PRIVATE)
+                                val array = runCatching { org.json.JSONArray(prefs.getString("places_json", "[]") ?: "[]") }.getOrElse { org.json.JSONArray() }
+                                val alreadySaved = (0 until array.length()).any { i -> array.optJSONObject(i)?.optString("address") == place.name }
+                                if (!alreadySaved) {
+                                    array.put(JSONObject().apply {
+                                        put("id", System.currentTimeMillis())
+                                        put("name", place.name.substringBefore(",").ifBlank { place.name })
+                                        put("address", place.name)
+                                    })
+                                    prefs.edit().putString("places_json", array.toString()).apply()
+                                }
+                                Toast.makeText(appContext, if (alreadySaved) "Already saved in MY PLACES" else "Saved to MY PLACES", Toast.LENGTH_SHORT).show()
+                            }
+                            LocationActionTile("STREET VIEW", "Zobacz ulicę", Icons.Default.Visibility, Modifier.weight(1f)) {
+                                showStreetView = true
+                            }
+                            LocationActionTile("PREVIEW", "Pokaż na mapie", Icons.Default.Map, Modifier.weight(1f), active = true) {
+                                selectedMapSearchLocation = place.latitude to place.longitude
+                                followEnabled = false
+                                roadPreviewPlace = null
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                mapSearchLoading = true
+                                mapSearchError = null
+                                mapSearchScope.launch {
+                                    try {
+                                        check(liveLatitude != null && liveLongitude != null) {
+                                            "GPS position is not ready. Wait for the blue vehicle marker, then press GO again."
+                                        }
+                                        val calculated = calculateRoadRoute(listOf("CURRENT LOCATION", place.name), "FASTEST", appContext)
+                                        RoutePlanStore.coordinatesJson = calculated.coordinatesJson
+                                        RoutePlanStore.summary = "${calculated.distanceText} · ${calculated.durationText}"
+                                        RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
+                                        RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
+                                        RoutePlanStore.steps = calculated.steps
+                                        RoutePlanStore.maneuvers = calculated.maneuvers
+                                        RoutePlanStore.origin = "CURRENT LOCATION"
+                                        RoutePlanStore.destination = place.name
+                                        remainingDistanceMetres = calculated.totalDistanceMetres
+                                        remainingDurationSeconds = calculated.totalDurationSeconds
+                                        selectedMapSearchLocation = null
+                                        roadPreviewPlace = null
+                                        showStreetView = false
+                                    } catch (e: Exception) {
+                                        Toast.makeText(appContext, e.localizedMessage ?: "Could not calculate HGV route", Toast.LENGTH_LONG).show()
+                                    } finally { mapSearchLoading = false }
+                                }
+                            },
+                            enabled = !mapSearchLoading,
+                            modifier = Modifier.fillMaxWidth().height(54.dp),
+                            shape = RoundedCornerShape(13.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF078FE8))
+                        ) {
+                            Icon(Icons.Default.Navigation, null, tint = White, modifier = Modifier.size(25.dp))
+                            Spacer(Modifier.width(9.dp))
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("GO", color = White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
+                                Text("ROZPOCZNIJ NAWIGACJĘ", color = White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showStreetView && roadPreviewPlace != null) {
+        val place = roadPreviewPlace!!
+        Dialog(onDismissRequest = { showStreetView = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f), color = Color(0xFF101820),
+                shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
+                Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("STREET VIEW · 360°", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(place.name, color = White, fontSize = 11.sp, maxLines = 2)
+                        }
+                        Text("CLOSE", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { showStreetView = false }.padding(8.dp))
+                    }
+                    AndroidView(Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp)), factory = { viewContext ->
+                        android.webkit.WebView(viewContext).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            webViewClient = android.webkit.WebViewClient()
+                            val key = BuildConfig.GOOGLE_MAPS_API_KEY
+                            val url = if (key.isNotBlank()) {
+                                "https://www.google.com/maps/embed/v1/streetview?key=" + URLEncoder.encode(key, "UTF-8") + "&location=" + place.latitude + "," + place.longitude + "&heading=0&pitch=0&fov=90"
+                            } else {
+                                "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + place.latitude + "," + place.longitude
+                            }
+                            loadUrl(url)
+                        }
+                    }, update = { })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocationActionTile(
+    title: String, subtitle: String, icon: ImageVector, modifier: Modifier = Modifier,
+    active: Boolean = false, onClick: () -> Unit
+) {
+    Surface(modifier = modifier.height(112.dp).clickable(onClick = onClick),
+        shape = RoundedCornerShape(15.dp),
+        color = if (active) Color(0xFF078FE8) else Color(0xFF26394B),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (active) Color(0xFF45BFFF) else Color(0xFF40566B))) {
+        Column(Modifier.fillMaxSize().padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center) {
+            Icon(icon, null, tint = White, modifier = Modifier.size(27.dp))
+            Spacer(Modifier.height(5.dp))
+            Text(title, color = White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(subtitle, color = Color(0xFFD0DCE6), fontSize = 9.sp, maxLines = 1)
         }
     }
 }
