@@ -1391,7 +1391,10 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Default.LocationOn, null, tint = Color(0xFF70C9FF), modifier = Modifier.size(19.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Column(Modifier.weight(1f)) {\n                                            Text(place.name, color = White, fontSize = 12.sp)\n                                            if (place.resultType == "street") Text("SELECT STREET · THEN CHOOSE HOUSE NUMBER", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold)\n                                        }
+                                        Column(Modifier.weight(1f)) {
+                                            Text(place.name, color = White, fontSize = 12.sp)
+                                            if (place.resultType == "street") Text("SELECT STREET · THEN CHOOSE HOUSE NUMBER", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
                                         Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF70C9FF))
                                     }
                                 }
@@ -2593,7 +2596,10 @@ private suspend fun searchMapPlaces(
                 props.optString("postcode"), props.optString("country")
             ).filter { it.isNotBlank() }.distinct()
             val label = parts.joinToString(", ")
-            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) {\n                val resultType = if (props.optString("type").equals("street", true)) "street" else if (props.optString("type").equals("house", true) || props.optString("housenumber").isNotBlank()) "house" else "address"\n                results.add(MapSearchResult(label, lat, lon, resultType))\n            }
+            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) {
+                val resultType = if (props.optString("type").equals("street", true)) "street" else if (props.optString("type").equals("house", true) || props.optString("housenumber").isNotBlank()) "house" else "address"
+                results.add(MapSearchResult(label, lat, lon, resultType))
+            }
         }
     } finally {
         connection.disconnect()
