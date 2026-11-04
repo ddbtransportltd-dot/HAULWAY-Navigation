@@ -2304,6 +2304,47 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
             }
         }
     }
+
+    roadPreviewPlace?.let { place ->
+        Dialog(onDismissRequest = { roadPreviewPlace = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f),
+                color = Color(0xFF101820), shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+            ) {
+                Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("ROAD PREVIEW · 360°", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text(place.name, color = White, fontSize = 11.sp, maxLines = 2)
+                        }
+                        Text("CLOSE", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { roadPreviewPlace = null }.padding(8.dp))
+                    }
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp)),
+                        factory = { viewContext ->
+                            android.webkit.WebView(viewContext).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.loadWithOverviewMode = true
+                                settings.useWideViewPort = true
+                                webViewClient = android.webkit.WebViewClient()
+                                val key = BuildConfig.GOOGLE_MAPS_API_KEY
+                                val url = if (key.isNotBlank()) {
+                                    "https://www.google.com/maps/embed/v1/streetview?key=" + URLEncoder.encode(key, "UTF-8") + "&location=" + place.latitude + "," + place.longitude + "&heading=0&pitch=0&fov=90"
+                                } else {
+                                    "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + place.latitude + "," + place.longitude
+                                }
+                                loadUrl(url)
+                            }
+                        },
+                        update = { }
+                    )
+                }
+            }
+        }
+    }
 }
 
 private data class MapSearchResult(val name: String, val latitude: Double, val longitude: Double)
