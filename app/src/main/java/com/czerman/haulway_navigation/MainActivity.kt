@@ -2395,7 +2395,11 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     }
     var searchText by remember { mutableStateOf("") }
     var selectedGroup by remember { mutableStateOf("ALL") }
-    var selectedScope by remember { mutableStateOf("MAP") }
+    var selectedScope by remember { mutableStateOf("NEAR ME") }
+    var trafficSnapshot by remember { mutableStateOf<HaulwayTrafficSnapshot?>(null) }
+    var trafficLoading by remember { mutableStateOf(false) }
+    var trafficError by remember { mutableStateOf<String?>(null) }
+    val trafficScope = rememberCoroutineScope()
     val groups = listOf("ALL", "TRAFFIC", "INCIDENTS", "ROAD STATUS", "WEATHER", "HGV RESTRICTIONS", "CHARGES & CONTROL", "SAFETY", "TRAVEL")
     val visibleLayers = layers.mapIndexed { index, layer -> index to layer }.filter { (_, layer) ->
         (selectedGroup == "ALL" || layer.group == selectedGroup) &&
@@ -2418,8 +2422,8 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                     Text("TRAFFIC CONTROL", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text("$activeCount LAYERS ENABLED", color = AccentBlue, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
-                Surface(shape = RoundedCornerShape(5.dp), color = Color(0xFF49351E)) {
-                    Text("LIVE OFFLINE", color = Color(0xFFFFC46B), fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                Surface(shape = RoundedCornerShape(5.dp), color = if (trafficSnapshot != null) Color(0xFF174A35) else Color(0xFF49351E)) {
+                    Text(if (trafficSnapshot != null) "LIVE CONNECTED" else "LIVE READY", color = if (trafficSnapshot != null) Color(0xFF8CE0AE) else Color(0xFFFFC46B), fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2434,14 +2438,45 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                     }
                 }
             }
-            Surface(color = Color(0xFF352B1D), shape = RoundedCornerShape(7.dp)) {
-                Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Surface(color = if (trafficError != null) Color(0xFF422629) else Color(0xFF173247), shape = RoundedCornerShape(7.dp)) {
+                Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFFFFC46B), modifier = Modifier.size(15.dp))
+                        Icon(if (trafficSnapshot != null) Icons.Default.CloudDone else Icons.Default.CloudDownload, contentDescription = null,
+                            tint = if (trafficSnapshot != null) Color(0xFF8CE0AE) else Color(0xFF8BD5FF), modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(5.dp))
-                        Text("LIVE DATA NOT CONNECTED", color = Color(0xFFFFC46B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(if (trafficSnapshot != null) "TOMTOM LIVE TRAFFIC" else "TOMTOM TRAFFIC CONNECTION", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text("Map layers and preferences are ready. Live incidents will appear only after a verified traffic provider is connected.", color = Color(0xFFE5D7C1), fontSize = 9.sp, lineHeight = 12.sp)
+                    Text(
+                        trafficError ?: trafficSnapshot?.let { "${it.incidents.size} verified incidents · refreshed ${SimpleDateFormat("HH:mm", Locale.UK).format(Date(it.fetchedAt))}" }
+                            ?: "Add a TomTom Traffic API key to load verified live incidents. No demo incidents are shown.",
+                        color = Color(0xFFE5EDF3), fontSize = 8.sp, lineHeight = 11.sp
+                    )
+                    Button(
+                        onClick = {
+                            if (!trafficLoading) {
+                                trafficLoading = true
+                                trafficError = null
+                                trafficScope.launch {
+                                    try {
+                                        trafficSnapshot = fetchHaulwayTrafficIncidents(context, selectedScope)
+                                    } catch (error: Exception) {
+                                        trafficError = error.message ?: "Traffic feed could not be loaded."
+                                    } finally {
+                                        trafficLoading = false
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !trafficLoading,
+                        modifier = Modifier.fillMaxWidth().height(31.dp),
+                        contentPadding = PaddingValues(2.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF087DBA), disabledContainerColor = Color(0xFF45525D))
+                    ) {
+                        if (trafficLoading) CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                        else Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(if (trafficLoading) "LOADING LIVE DATA…" else "REFRESH LIVE TRAFFIC", fontSize = 8.sp)
+                    }
                 }
             }
             BasicTextField(
@@ -2518,6 +2553,37 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                     )
                 }
             }
+            trafficSnapshot?.let { snapshot ->
+                Text("LIVE INCIDENTS · ${snapshot.incidents.size}", color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                val displayedIncidents = snapshot.incidents.filter { incident ->
+                    when (incident.category.lowercase()) {
+                        "accident" -> enabled[3]
+                        "jam" -> enabled[1] || enabled[2]
+                        "roadworks" -> enabled[7]
+                        "laneclosed" -> enabled[8]
+                        "roadclosed" -> enabled[9]
+                        "brokendownvehicle" -> enabled[4]
+                        "fog" -> enabled[15]
+                        "rain", "flooding", "ice", "wind", "dangerousconditions" -> enabled[12] || enabled[13] || enabled[14] || enabled[16]
+                        else -> enabled[0] || enabled[5] || enabled[6]
+                    }
+                }
+                if (displayedIncidents.isEmpty()) {
+                    Text("No incidents match the enabled layers in this area.", color = muted, fontSize = 8.sp)
+                } else displayedIncidents.take(12).forEach { incident ->
+                    Surface(color = Color(0xFF263440), shape = RoundedCornerShape(6.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(7.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(incident.category.replaceFirstChar { it.uppercase() }, color = Color(0xFFFFC46B), fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                Text(incident.severity.uppercase(), color = Color.White, fontSize = 7.sp)
+                            }
+                            Text(incident.description, color = Color.White, fontSize = 9.sp, lineHeight = 11.sp)
+                            if (incident.road.isNotBlank()) Text(incident.road, color = muted, fontSize = 8.sp)
+                            if (incident.delaySeconds > 0) Text("Reported delay: ${incident.delaySeconds / 60} min", color = Color(0xFFFFC46B), fontSize = 8.sp)
+                        }
+                    }
+                }
+            }
             Text("FILTERS ARE SAVED ON THIS DEVICE", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
         Box(Modifier.weight(0.66f).fillMaxHeight().padding(start = 3.dp)) {
@@ -2527,9 +2593,9 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                     Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
                         Text("TRAFFIC OVERVIEW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text(when (selectedScope) {
-                            "ROUTE" -> "Scope: active route (waiting for live provider)"
-                            "NEAR ME" -> "Scope: current location (waiting for live provider)"
-                            else -> "Scope: visible map area"
+                            "ROUTE" -> "Scope: active route area"
+                            "NEAR ME" -> "Scope: around current GPS position"
+                            else -> "Scope: current map position"
                         }, color = muted, fontSize = 8.sp)
                     }
                 }
@@ -2553,9 +2619,9 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
             ) {
                 Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("DATA STATUS", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    Text("Traffic feed: not connected", color = Color(0xFFFFC46B), fontSize = 8.sp)
-                    Text("Map tiles: basemap only", color = muted, fontSize = 8.sp)
-                    Text("Last update: unavailable", color = muted, fontSize = 8.sp)
+                    Text(if (trafficSnapshot != null) "Traffic feed: TomTom live" else "Traffic feed: awaiting API key", color = if (trafficSnapshot != null) Color(0xFF8CE0AE) else Color(0xFFFFC46B), fontSize = 8.sp)
+                    Text("Map tiles: existing basemap unchanged", color = muted, fontSize = 8.sp)
+                    Text("Last update: ${trafficSnapshot?.let { SimpleDateFormat("HH:mm:ss", Locale.UK).format(Date(it.fetchedAt)) } ?: "not available"}", color = muted, fontSize = 8.sp)
                 }
             }
         }
