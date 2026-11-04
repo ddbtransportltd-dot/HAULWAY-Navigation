@@ -3,7 +3,7 @@ name: HAULWAY Android Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, 'fix/map-navigation-stability']
 
 permissions:
   contents: read
