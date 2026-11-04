@@ -2350,6 +2350,109 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private data class HaulwayTrafficIncident(
+    val id: String,
+    val category: String,
+    val severity: String,
+    val description: String,
+    val road: String,
+    val delaySeconds: Int,
+    val latitude: Double?,
+    val longitude: Double?
+)
+
+private data class HaulwayTrafficSnapshot(
+    val incidents: List<HaulwayTrafficIncident>,
+    val fetchedAt: Long,
+    val trafficModelId: String?
+)
+
+private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String): HaulwayTrafficSnapshot =
+    withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.TOMTOM_TRAFFIC_API_KEY.trim()
+        check(apiKey.isNotEmpty()) {
+            "TomTom Traffic API key is missing. Add TOMTOM_TRAFFIC_API_KEY to GitHub Actions secrets or local.properties."
+        }
+
+        val routeJson = RoutePlanStore.coordinatesJson
+        val routeBounds = if (scope == "ROUTE" && !routeJson.isNullOrBlank()) {
+            val coords = org.json.JSONArray(routeJson)
+            val points = (0 until coords.length()).mapNotNull { index ->
+                val point = coords.optJSONArray(index) ?: return@mapNotNull null
+                if (point.length() < 2) null else point.getDouble(0) to point.getDouble(1)
+            }
+            if (points.isNotEmpty()) {
+                val centerLon = (points.minOf { it.first } + points.maxOf { it.first }) / 2.0
+                val centerLat = (points.minOf { it.second } + points.maxOf { it.second }) / 2.0
+                val halfLon = ((points.maxOf { it.first } - points.minOf { it.first }) / 2.0 + 0.08).coerceAtMost(0.45)
+                val halfLat = ((points.maxOf { it.second } - points.minOf { it.second }) / 2.0 + 0.08).coerceAtMost(0.45)
+                listOf(centerLon - halfLon, centerLat - halfLat, centerLon + halfLon, centerLat + halfLat)
+            } else null
+        } else null
+
+        val bbox = routeBounds ?: run {
+            val location = resolveHaulwayCurrentLocation(context)
+            val lon = location.first
+            val lat = location.second
+            val latPad = 0.22
+            val lonPad = 0.30 / maxOf(0.25, kotlin.math.cos(Math.toRadians(lat)))
+            listOf(lon - lonPad, lat - latPad, lon + lonPad, lat + latPad)
+        }
+        val bboxText = bbox.joinToString(",") { String.format(Locale.US, "%.6f", it) }
+        val endpoint = "https://api.tomtom.com/maps/orbis/traffic/incidents/details?apiVersion=2&bbox=$bboxText&timeValidity=present"
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 12000
+            readTimeout = 18000
+            setRequestProperty("TomTom-Api-Key", apiKey)
+            setRequestProperty("TomTom-Api-Version", "2")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Accept-Language", "en-GB")
+            setRequestProperty("Attributes", "incidents(type,geometry(type,coordinates),properties(id,iconCategory,magnitudeOfDelay,events(description),from,to,roadNumbers,delayInSeconds,timeValidity,lastReportTime))")
+            setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0")
+        }
+        try {
+            val code = connection.responseCode
+            val body = (if (code in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            check(code in 200..299) {
+                when (code) {
+                    401, 403 -> "TomTom rejected the API key or Traffic API access (HTTP $code). Check your TomTom project."
+                    429 -> "TomTom Traffic API quota/rate limit reached. Try again later."
+                    else -> "TomTom Traffic API error (HTTP $code): ${body.take(180)}"
+                }
+            }
+            val root = JSONObject(body)
+            val array = root.optJSONArray("incidents") ?: org.json.JSONArray()
+            val incidents = (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val props = item.optJSONObject("properties") ?: return@mapNotNull null
+                val geometry = item.optJSONObject("geometry")
+                val coordinates = geometry?.optJSONArray("coordinates")
+                val firstPoint = if (geometry?.optString("type") == "Point") coordinates else coordinates?.optJSONArray(0)
+                val events = props.optJSONArray("events")
+                val description = events?.optJSONObject(0)?.optString("description").orEmpty()
+                val roads = props.optJSONArray("roadNumbers")
+                val roadNumbers = (0 until (roads?.length() ?: 0)).mapNotNull { roads?.optString(it) }.filter { it.isNotBlank() }
+                HaulwayTrafficIncident(
+                    id = props.optString("id", "incident-$index"),
+                    category = props.optString("iconCategory", "unknown"),
+                    severity = props.optString("magnitudeOfDelay", "unknown"),
+                    description = description.ifBlank { props.optString("iconCategory", "Traffic incident") },
+                    road = roadNumbers.joinToString(", ").ifBlank {
+                        listOf(props.optString("from"), props.optString("to")).filter { it.isNotBlank() }.joinToString(" → ")
+                    },
+                    delaySeconds = props.optInt("delayInSeconds", 0),
+                    latitude = if (firstPoint != null && firstPoint.length() >= 2) firstPoint.optDouble(1).takeIf { it.isFinite() } else null,
+                    longitude = if (firstPoint != null && firstPoint.length() >= 2) firstPoint.optDouble(0).takeIf { it.isFinite() } else null
+                )
+            }
+            HaulwayTrafficSnapshot(incidents, System.currentTimeMillis(), connection.getHeaderField("TrafficModelID"))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
 private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     data class TrafficLayer(val name: String, val group: String, val enabledByDefault: Boolean = true)
     val layers = listOf(
