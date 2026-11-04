@@ -2351,98 +2351,216 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
 
 @Composable
 private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
+    data class TrafficLayer(val name: String, val group: String, val enabledByDefault: Boolean = true)
     val layers = listOf(
-        "Live traffic flow" to true,
-        "Traffic jams & queues" to true,
-        "Accidents & collisions" to true,
-        "Breakdowns" to true,
-        "Roadworks" to true,
-        "Lane closures" to true,
-        "Full road closures" to true,
-        "Temporary traffic lights" to true,
-        "Police / emergency incidents" to true,
-        "Obstacles & debris" to true,
-        "Flooding" to true,
-        "Snow & ice" to true,
-        "Strong wind" to true,
-        "Fog / poor visibility" to true,
-        "Vehicle restrictions" to true,
-        "Height / weight limits" to true,
-        "Low bridges" to true,
-        "Width restrictions" to true,
-        "Low emission zones" to false,
-        "Toll roads & charges" to false,
-        "Speed cameras" to true,
-        "Railway crossings" to true,
-        "Ferries & bridge status" to true,
-        "Parking / truck stops" to false
+        TrafficLayer("Live traffic flow", "TRAFFIC"),
+        TrafficLayer("Traffic jams & queues", "TRAFFIC"),
+        TrafficLayer("Slow traffic", "TRAFFIC"),
+        TrafficLayer("Accidents & collisions", "INCIDENTS"),
+        TrafficLayer("Vehicle breakdowns", "INCIDENTS"),
+        TrafficLayer("Police / emergency incidents", "INCIDENTS"),
+        TrafficLayer("Obstacles & debris", "INCIDENTS"),
+        TrafficLayer("Roadworks", "ROAD STATUS"),
+        TrafficLayer("Lane closures", "ROAD STATUS"),
+        TrafficLayer("Full road closures", "ROAD STATUS"),
+        TrafficLayer("Temporary traffic lights", "ROAD STATUS"),
+        TrafficLayer("Bridge closures", "ROAD STATUS"),
+        TrafficLayer("Flooding on roads", "WEATHER"),
+        TrafficLayer("Snow & ice", "WEATHER"),
+        TrafficLayer("Strong wind", "WEATHER"),
+        TrafficLayer("Fog / poor visibility", "WEATHER"),
+        TrafficLayer("Severe weather warnings", "WEATHER"),
+        TrafficLayer("Height restrictions", "HGV RESTRICTIONS"),
+        TrafficLayer("Weight restrictions", "HGV RESTRICTIONS"),
+        TrafficLayer("Width restrictions", "HGV RESTRICTIONS"),
+        TrafficLayer("Length restrictions", "HGV RESTRICTIONS"),
+        TrafficLayer("Low bridges", "HGV RESTRICTIONS"),
+        TrafficLayer("Axle / vehicle restrictions", "HGV RESTRICTIONS"),
+        TrafficLayer("Low emission zones", "CHARGES & CONTROL", false),
+        TrafficLayer("Toll roads & charges", "CHARGES & CONTROL", false),
+        TrafficLayer("Congestion charge zones", "CHARGES & CONTROL", false),
+        TrafficLayer("Speed cameras", "SAFETY"),
+        TrafficLayer("Average speed cameras", "SAFETY"),
+        TrafficLayer("Railway crossings", "SAFETY"),
+        TrafficLayer("Ferries & bridge status", "TRAVEL"),
+        TrafficLayer("Truck parking & rest areas", "TRAVEL", false),
+        TrafficLayer("Fuel stops", "TRAVEL", false)
     )
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("haulway_traffic_layers", Context.MODE_PRIVATE) }
-    val enabled = remember { mutableStateListOf(*layers.mapIndexed { index, item -> prefs.getBoolean("layer_$index", item.second) }.toTypedArray()) }
-    Row(modifier = modifier.background(Color(0xFF101419))) {
+    val enabled = remember {
+        mutableStateListOf(*layers.mapIndexed { index, item ->
+            prefs.getBoolean("layer_$index", item.enabledByDefault)
+        }.toTypedArray())
+    }
+    var searchText by remember { mutableStateOf("") }
+    var selectedGroup by remember { mutableStateOf("ALL") }
+    var selectedScope by remember { mutableStateOf("MAP") }
+    val groups = listOf("ALL", "TRAFFIC", "INCIDENTS", "ROAD STATUS", "WEATHER", "HGV RESTRICTIONS", "CHARGES & CONTROL", "SAFETY", "TRAVEL")
+    val visibleLayers = layers.mapIndexed { index, layer -> index to layer }.filter { (_, layer) ->
+        (selectedGroup == "ALL" || layer.group == selectedGroup) &&
+            layer.name.contains(searchText, ignoreCase = true)
+    }
+    val activeCount = enabled.count { it }
+    val muted = Color(0xFF9AAAB7)
+    val panel = Color(0xFF151E27)
+    val tile = Color(0xFF202C37)
+    val blue = Color(0xFF168DD2)
+    Row(modifier = modifier.background(Color(0xFF0D141B))) {
         Column(
-            modifier = Modifier.weight(0.30f).fillMaxHeight().background(Color(0xFF151C23))
-                .verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+            modifier = Modifier.weight(0.34f).fillMaxHeight()
+                .background(panel).verticalScroll(rememberScrollState())
+                .padding(horizontal = 9.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            layers.forEachIndexed { index, layer ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("TRAFFIC CONTROL", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("$activeCount LAYERS ENABLED", color = AccentBlue, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+                Surface(shape = RoundedCornerShape(5.dp), color = Color(0xFF49351E)) {
+                    Text("LIVE OFFLINE", color = Color(0xFFFFC46B), fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("MAP", "ROUTE", "NEAR ME").forEach { scope ->
+                    Surface(
+                        modifier = Modifier.weight(1f).clickable { selectedScope = scope },
+                        shape = RoundedCornerShape(5.dp),
+                        color = if (selectedScope == scope) blue else tile
+                    ) {
+                        Text(scope, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 7.dp))
+                    }
+                }
+            }
+            Surface(color = Color(0xFF352B1D), shape = RoundedCornerShape(7.dp)) {
+                Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CloudOff, contentDescription = null, tint = Color(0xFFFFC46B), modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("LIVE DATA NOT CONNECTED", color = Color(0xFFFFC46B), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text("Map layers and preferences are ready. Live incidents will appear only after a verified traffic provider is connected.", color = Color(0xFFE5D7C1), fontSize = 9.sp, lineHeight = 12.sp)
+                }
+            }
+            BasicTextField(
+                value = searchText,
+                onValueChange = { searchText = it },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(tile).padding(horizontal = 9.dp, vertical = 10.dp),
+                decorationBox = { inner ->
+                    if (searchText.isEmpty()) Text("Search traffic layers…", color = muted, fontSize = 11.sp)
+                    inner()
+                }
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Button(onClick = {
+                    layers.indices.forEach { index -> enabled[index] = true; prefs.edit().putBoolean("layer_$index", true).apply() }
+                }, modifier = Modifier.weight(1f).height(32.dp), contentPadding = PaddingValues(2.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF176B9D))) {
+                    Text("SELECT ALL", fontSize = 8.sp)
+                }
+                Button(onClick = {
+                    layers.indices.forEach { index -> enabled[index] = false; prefs.edit().putBoolean("layer_$index", false).apply() }
+                }, modifier = Modifier.weight(1f).height(32.dp), contentPadding = PaddingValues(2.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39434C))) {
+                    Text("CLEAR ALL", fontSize = 8.sp)
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                groups.forEach { group ->
+                    val count = if (group == "ALL") layers.size else layers.count { it.group == group }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable { selectedGroup = group },
+                        shape = RoundedCornerShape(5.dp),
+                        color = if (selectedGroup == group) Color(0xFF17496A) else Color.Transparent
+                    ) {
+                        Row(Modifier.padding(horizontal = 7.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(group, color = if (selectedGroup == group) Color.White else muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text(count.toString(), color = muted, fontSize = 8.sp)
+                        }
+                    }
+                }
+            }
+            visibleLayers.forEach { (index, layer) ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 43.dp)
-                        .clip(RoundedCornerShape(6.dp)).background(Color(0xFF202A33))
-                        .clickable { enabled[index] = !enabled[index]; prefs.edit().putBoolean("layer_$index", enabled[index]).apply() }.padding(horizontal = 7.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 38.dp)
+                        .clip(RoundedCornerShape(6.dp)).background(tile)
+                        .clickable { enabled[index] = !enabled[index]; prefs.edit().putBoolean("layer_$index", enabled[index]).apply() }
+                        .padding(start = 7.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = when {
-                            layer.first.contains("Accident") || layer.first.contains("collision") -> Icons.Default.CarCrash
-                            layer.first.contains("Roadwork") || layer.first.contains("lane closure") -> Icons.Default.Construction
-                            layer.first.contains("closure") || layer.first.contains("restriction") -> Icons.Default.Block
-                            layer.first.contains("bridge") || layer.first.contains("Height") || layer.first.contains("Width") -> Icons.Default.LocalShipping
-                            layer.first.contains("camera") || layer.first.contains("Speed") -> Icons.Default.Speed
-                            layer.first.contains("emission") -> Icons.Default.Eco
-                            layer.first.contains("Parking") -> Icons.Default.LocalParking
-                            layer.first.contains("wind") || layer.first.contains("Fog") || layer.first.contains("Snow") || layer.first.contains("Flood") -> Icons.Default.Cloud
-                            layer.first.contains("jam") || layer.first.contains("queue") || layer.first.contains("traffic") -> Icons.Default.Warning
-                            else -> Icons.Default.ReportProblem
+                        imageVector = when (layer.group) {
+                            "INCIDENTS" -> Icons.Default.CarCrash
+                            "ROAD STATUS" -> Icons.Default.Construction
+                            "WEATHER" -> Icons.Default.Cloud
+                            "HGV RESTRICTIONS" -> Icons.Default.LocalShipping
+                            "CHARGES & CONTROL" -> Icons.Default.Eco
+                            "SAFETY" -> Icons.Default.Speed
+                            "TRAVEL" -> Icons.Default.LocalParking
+                            else -> Icons.Default.Traffic
                         },
-                        contentDescription = null,
-                        tint = Color(0xFF73C9FF),
-                        modifier = Modifier.size(17.dp)
+                        contentDescription = null, tint = AccentBlue, modifier = Modifier.size(15.dp)
                     )
                     Spacer(Modifier.width(5.dp))
-                    Text(layer.first, color = Color.White, fontSize = 10.sp, lineHeight = 11.sp,
-                        fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text(layer.name, color = Color.White, fontSize = 9.sp, lineHeight = 11.sp, modifier = Modifier.weight(1f))
                     androidx.compose.material3.Switch(
                         checked = enabled[index],
                         onCheckedChange = { enabled[index] = it; prefs.edit().putBoolean("layer_$index", it).apply() },
-                        modifier = Modifier.scale(0.66f).width(38.dp),
+                        modifier = Modifier.scale(0.62f).width(36.dp),
                         colors = androidx.compose.material3.SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF087ED1),
-                            uncheckedThumbColor = Color(0xFFCBD3DA),
-                            uncheckedTrackColor = Color(0xFF53616C)
+                            checkedThumbColor = Color.White, checkedTrackColor = blue,
+                            uncheckedThumbColor = Color(0xFFCBD3DA), uncheckedTrackColor = Color(0xFF53616C)
                         )
                     )
                 }
             }
+            Text("FILTERS ARE SAVED ON THIS DEVICE", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
-        Box(Modifier.weight(0.70f).fillMaxHeight().padding(start = 3.dp)) {
+        Box(Modifier.weight(0.66f).fillMaxHeight().padding(start = 3.dp)) {
             RoutePlannerMapView(routeJson = null)
-            // CARTO supplies basemap tiles only. Live incident symbols must come from a traffic-data provider.
+            Column(Modifier.align(Alignment.TopStart).padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(color = Color(0xE619252F), shape = RoundedCornerShape(7.dp)) {
+                    Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
+                        Text("TRAFFIC OVERVIEW", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(when (selectedScope) {
+                            "ROUTE" -> "Scope: active route (waiting for live provider)"
+                            "NEAR ME" -> "Scope: current location (waiting for live provider)"
+                            else -> "Scope: visible map area"
+                        }, color = muted, fontSize = 8.sp)
+                    }
+                }
+                Surface(color = Color(0xE619252F), shape = RoundedCornerShape(7.dp)) {
+                    Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("MAP LEGEND", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        listOf("Traffic flow" to Color(0xFFFFB74D), "Accident / incident" to Color(0xFFE45A5A), "Roadworks / closure" to Color(0xFFFF8A3D), "HGV restriction" to Color(0xFFB58AE8), "Weather hazard" to Color(0xFF65BDEB)).forEach { item ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(7.dp).clip(CircleShape).background(item.second))
+                                Spacer(Modifier.width(5.dp))
+                                Text(item.first, color = Color.White, fontSize = 8.sp)
+                            }
+                        }
+                        Text("Legend only — no incident markers are fabricated.", color = Color(0xFFFFC46B), fontSize = 7.sp)
+                    }
+                }
+            }
             Surface(
-                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                color = Color(0xD91A242D), shape = RoundedCornerShape(5.dp)
+                modifier = Modifier.align(Alignment.BottomEnd).padding(9.dp),
+                color = Color(0xE619252F), shape = RoundedCornerShape(7.dp)
             ) {
-                Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    Text("TRAFFIC FILTERS", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    Text("LIVE INCIDENT FEED NOT CONNECTED", color = Color(0xFFFFC46B), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("DATA STATUS", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Text("Traffic feed: not connected", color = Color(0xFFFFC46B), fontSize = 8.sp)
+                    Text("Map tiles: basemap only", color = muted, fontSize = 8.sp)
+                    Text("Last update: unavailable", color = muted, fontSize = 8.sp)
                 }
             }
         }
     }
 }
-
 @Composable
 private fun TrafficBottomNavigation(
     section: String,
