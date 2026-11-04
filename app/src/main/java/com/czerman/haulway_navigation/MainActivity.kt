@@ -1188,18 +1188,23 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         val mins = (secondsLeft / 60.0).toInt().coerceAtLeast(0)
                         "${mins / 60} h ${mins % 60} min"
                     } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
+                    val arrivalTime = remainingDurationSeconds?.let { java.text.SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(System.currentTimeMillis() + (it * 1000.0).toLong())) } ?: "—"
+                    val durationLabel = RoutePlanStore.totalDurationSeconds.takeIf { it > 0.0 }?.let {
+                        val mins = (it / 60.0).toInt()
+                        "${mins / 60} h ${mins % 60} min"
+                    } ?: "—"
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(distanceLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                            Spacer(Modifier.width(5.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                                val arrivalTime = remainingDurationSeconds?.let { java.text.SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(System.currentTimeMillis() + (it * 1000.0).toLong())) } ?: "—"
-                                Text("ARRIVAL  $arrivalTime", color = Color(0xFFD5EAF7), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                            listOf(
+                                "DISTANCE LEFT" to distanceLabel,
+                                "ETA" to etaLabel,
+                                "DURATION" to durationLabel,
+                                "ARRIVAL" to arrivalTime
+                            ).forEach { (label, value) ->
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(label, color = Color(0xFF9FC5DC), fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                                    Text(value, color = White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                                }
                             }
                         }
                     }
