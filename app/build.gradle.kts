@@ -19,6 +19,7 @@ fun secret(name: String): String = sequenceOf(
 ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
 val orsApiKey = secret("ORS_API_KEY")
 val cartoApiKey = secret("CARTO_API_KEY")
+val tomtomTrafficApiKey = secret("TOMTOM_TRAFFIC_API_KEY")
 val googleMapsJavaScriptApiKey = sequenceOf(
     localSecrets.getProperty("GOOGLE_STREETVIEW_API_KEY"),
     localSecrets.getProperty("GOOGLE_MAPS_API_KEY"),
@@ -49,6 +50,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "CARTO_API_KEY", "\"${cartoApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "TOMTOM_TRAFFIC_API_KEY", "\"${tomtomTrafficApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "GOOGLE_MAPS_API_KEY", "\"${googleMapsJavaScriptApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "MAPILLARY_ACCESS_TOKEN", "\"${mapillaryAccessToken.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
