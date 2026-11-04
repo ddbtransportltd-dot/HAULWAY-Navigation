@@ -13,7 +13,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.Manifest
-import android.view.View
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -23,9 +22,6 @@ import android.speech.tts.TextToSpeech
 import java.util.Locale
 import java.util.Date
 import java.text.SimpleDateFormat
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.setContent
@@ -78,6 +74,22 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.Point
 
 private val MapBackground = Color(0xFFE7E8E5)
 private val RoadColor = Color(0xFFFAFAF8)
@@ -1279,504 +1291,287 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
     }
 }
 
-@Composable
-private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, followEnabled: Boolean, tilt3D: Boolean, searchLocation: Pair<Double, Double>?) {
-    val context = LocalContext.current
-    var pageReady by remember { mutableStateOf(false) }
-    var lastSentRoute by remember { mutableStateOf<String?>(null) }
-    var lastSentZoom by remember { mutableStateOf<Int?>(null) }
-    var lastSentFollowRequest by remember { mutableStateOf<Int?>(null) }
-    var lastSentMapStyleRequest by remember { mutableStateOf<Int?>(null) }
-    val mapPrefs = remember { context.getSharedPreferences("haulway_settings_v10", Context.MODE_PRIVATE) }
-    var lastSentAppearance by remember { mutableStateOf<String?>(null) }
-    var lastSentHeadingUp by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentFollowEnabled by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentTilt3D by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    AndroidView(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF101B24)),
-        factory = { ctx ->
-            WebView(ctx).apply {
-                setBackgroundColor(android.graphics.Color.rgb(16, 27, 36))
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.setGeolocationEnabled(true)
-                settings.loadsImagesAutomatically = true
-                settings.blockNetworkImage = false
-                settings.allowContentAccess = true
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                settings.setSupportZoom(false)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                isVerticalScrollBarEnabled = false
-                isHorizontalScrollBarEnabled = false
-                webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                        pageReady = false
-                        lastSentZoom = null
-                        lastSentRoute = null
-                        android.util.Log.i("HAULWAY_MAP", "Map page started: $url")
-                    }
-                    override fun onPageFinished(view: WebView, url: String?) {
-                        pageReady = true
-                        android.util.Log.i("HAULWAY_MAP", "Map document ready: $url")
-                        view.evaluateJavascript("(function(){return 'doc='+document.readyState+', leaflet='+typeof window.L+', map='+!!document.getElementById('map')})()") { result ->
-                            android.util.Log.i("HAULWAY_MAP", "Page diagnostic: $result")
-                            view.evaluateJavascript("(function(){var m=document.getElementById('map'),t=document.getElementById('tiles'),w=document.getElementById('tileworld');return 'viewport='+m.clientWidth+'x'+m.clientHeight+',tiles='+t.children.length+',world='+getComputedStyle(w).transform})()") { geometry ->
-                                android.util.Log.i("HAULWAY_MAP", "Render geometry: $geometry")
-                            }
-                        }
-                    }
-                    override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
-                        android.util.Log.e("HAULWAY_MAP", "Web resource error ${error.errorCode}: ${error.description} (${request.url})")
-                    }
-                    override fun onReceivedHttpError(view: WebView, request: android.webkit.WebResourceRequest, response: android.webkit.WebResourceResponse) {
-                        android.util.Log.w("HAULWAY_MAP", "HTTP ${response.statusCode} ${request.url}")
-                    }
-                    override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
-                        pageReady = false
-                        android.util.Log.e("HAULWAY_MAP", "WebView renderer exited; crashed=${detail.didCrash()}")
-                        return true
-                    }
-                }
-                webChromeClient = object : WebChromeClient() {
-                    override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
-                        val level = when (consoleMessage?.messageLevel()) {
-                            android.webkit.ConsoleMessage.MessageLevel.ERROR -> android.util.Log.ERROR
-                            android.webkit.ConsoleMessage.MessageLevel.WARNING -> android.util.Log.WARN
-                            else -> android.util.Log.INFO
-                        }
-                        android.util.Log.println(level, "HAULWAY_MAP", "JS ${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})")
-                        return true
-                    }
-                    override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: android.webkit.GeolocationPermissions.Callback?) {
-                        val fine = androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        val coarse = androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        callback?.invoke(origin, fine || coarse, false)
-                    }
-                }
-                android.util.Log.i("HAULWAY_MAP", "Creating WebView and loading embedded map HTML")
-                addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                    android.util.Log.i("HAULWAY_MAP", "WebView layout size: ${right-left}x${bottom-top}")
-                    if (right > left && bottom > top) {
-                        post { evaluateJavascript("window.haulwayResize && window.haulwayResize()", null) }
-                    }
-                }
-                // A synthetic .local hostname triggers DNS lookups for favicon.ico on Android WebView.
-                // Use the Android asset origin instead; all map libraries and tile URLs are absolute HTTPS URLs.
-                loadDataWithBaseURL("file:///android_asset/", NAVIGATION_MAP_HTML, "text/html", "UTF-8", null)
+
+private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+
+private fun updateHaulwayNativeMapOverlays(
+    style: Style,
+    routeJson: String?,
+    latitude: Double?,
+    longitude: Double?,
+    searchLocation: Pair<Double, Double>?
+) {
+    if (!routeJson.isNullOrBlank()) {
+        runCatching {
+            val input = org.json.JSONArray(routeJson)
+            val coordinates = org.json.JSONArray()
+            for (i in 0 until input.length()) {
+                val pair = input.getJSONArray(i)
+                coordinates.put(org.json.JSONArray().put(pair.getDouble(0)).put(pair.getDouble(1)))
             }
-        },
-        update = { webView ->
-            // Do not reload the WebView on every Compose recomposition: that discarded
-            // the live map, GPS marker and route overlay, leaving only the map background.
-            if (pageReady) {
-                if (lastSentZoom != zoom) {
-                    webView.evaluateJavascript("window.haulwaySetZoom && window.haulwaySetZoom($zoom)", null)
-                    lastSentZoom = zoom
+            val geometry = JSONObject().put("type", "LineString").put("coordinates", coordinates)
+            val featureJson = JSONObject()
+                .put("type", "Feature")
+                .put("geometry", geometry)
+                .put("properties", JSONObject())
+                .toString()
+            val feature = Feature.fromJson(featureJson)
+            val source = style.getSourceAs<GeoJsonSource>("haulway-route-source")
+            if (source != null) {
+                source.setGeoJson(feature)
+            } else {
+                style.addSource(GeoJsonSource("haulway-route-source", feature))
+                style.addLayer(
+                    LineLayer("haulway-route-line", "haulway-route-source").withProperties(
+                        PropertyFactory.lineColor("#00A9FF"),
+                        PropertyFactory.lineWidth(6f),
+                        PropertyFactory.lineOpacity(0.96f)
+                    )
+                )
+            }
+        }.onFailure {
+            android.util.Log.e("HAULWAY_MAPLIBRE", "Route overlay failed", it)
+        }
+    }
+
+    if (latitude != null && longitude != null) {
+        val point = Feature.fromGeometry(Point.fromLngLat(longitude, latitude))
+        val source = style.getSourceAs<GeoJsonSource>("haulway-vehicle-source")
+        if (source != null) {
+            source.setGeoJson(point)
+        } else {
+            style.addSource(GeoJsonSource("haulway-vehicle-source", point))
+            style.addLayer(
+                CircleLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
+                    PropertyFactory.circleRadius(9f),
+                    PropertyFactory.circleColor("#168FE8"),
+                    PropertyFactory.circleStrokeColor("#FFFFFF"),
+                    PropertyFactory.circleStrokeWidth(3f)
+                )
+            )
+        }
+    }
+
+    if (searchLocation != null) {
+        val point = Feature.fromGeometry(Point.fromLngLat(searchLocation.second, searchLocation.first))
+        val source = style.getSourceAs<GeoJsonSource>("haulway-search-source")
+        if (source != null) {
+            source.setGeoJson(point)
+        } else {
+            style.addSource(GeoJsonSource("haulway-search-source", point))
+            style.addLayer(
+                CircleLayer("haulway-search-marker", "haulway-search-source").withProperties(
+                    PropertyFactory.circleRadius(8f),
+                    PropertyFactory.circleColor("#FF9638"),
+                    PropertyFactory.circleStrokeColor("#FFFFFF"),
+                    PropertyFactory.circleStrokeWidth(2f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun HaulwayNativeMapCanvas(
+    routeJson: String?,
+    latitude: Double? = null,
+    longitude: Double? = null,
+    bearing: Float? = null,
+    zoom: Int = 0,
+    followRequest: Int = 0,
+    followEnabled: Boolean = true,
+    tilt3D: Boolean = false,
+    searchLocation: Pair<Double, Double>? = null,
+    showGlobeControl: Boolean = false
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var globeMode by remember { mutableStateOf(false) }
+    var styleReady by remember { mutableStateOf(false) }
+    var styleError by remember { mutableStateOf<String?>(null) }
+    var cachedStyleJson by remember { mutableStateOf<String?>(null) }
+
+    val mapView = remember(context) {
+        MapLibre.getInstance(context)
+        MapView(context).also { it.onCreate(null) }
+    }
+
+    DisposableEffect(lifecycleOwner, mapView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapView.onDestroy()
+        }
+    }
+
+    LaunchedEffect(mapView) {
+        mapView.getMapAsync { map ->
+            mapLibreMap = map
+            map.uiSettings.isRotateGesturesEnabled = true
+            map.uiSettings.isCompassEnabled = true
+            map.cameraPosition = CameraPosition.Builder()
+                .target(LatLng(53.4808, -2.2426))
+                .zoom(6.0)
+                .build()
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, globeMode) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        styleReady = false
+        styleError = null
+        try {
+            val rawStyle = cachedStyleJson ?: withContext(Dispatchers.IO) {
+                val connection = URL(HAULWAY_NATIVE_MAP_STYLE_URL).openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 12000
+                connection.readTimeout = 18000
+                try {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } finally {
+                    connection.disconnect()
                 }
-                val routeJson = RoutePlanStore.coordinatesJson
-                if (routeJson != null && routeJson != lastSentRoute) {
-                    val safeJson = JSONObject.quote(routeJson)
-                    webView.evaluateJavascript("window.haulwaySetRoute && window.haulwaySetRoute($safeJson)", null)
-                    lastSentRoute = routeJson
-                }
-                if (latitude != null && longitude != null) {
-                    val heading = bearing?.toDouble() ?: Double.NaN
-                    val accuracyMetres = accuracy?.toDouble() ?: 18.0
-                    webView.evaluateJavascript("window.haulwaySetVehicleLocation && window.haulwaySetVehicleLocation($latitude,$longitude,$heading,$accuracyMetres)", null)
-                }
-                if (followRequest > 0 && lastSentFollowRequest != followRequest) {
-                    webView.evaluateJavascript("window.haulwayFollowRequest && window.haulwayFollowRequest($followRequest)", null)
-                    lastSentFollowRequest = followRequest
-                }
-                if (mapStyleRequest > 0 && lastSentMapStyleRequest != mapStyleRequest) {
-                    webView.evaluateJavascript("window.haulwaySetMapStyleRequest && window.haulwaySetMapStyleRequest($mapStyleRequest)", null)
-                    lastSentMapStyleRequest = mapStyleRequest
-                }
-                val appearance = mapPrefs.getString("map_mode", "Auto") ?: "Auto"
-                val selectedStyle = mapPrefs.getString("map_style", "Voyager") ?: "Voyager"
-                val appearanceKey = "$appearance|$selectedStyle"
-                if (lastSentAppearance != appearanceKey) {
-                    webView.evaluateJavascript("window.haulwayApplyAppearance && window.haulwayApplyAppearance(${JSONObject.quote(appearance)},${JSONObject.quote(selectedStyle)})", null)
-                    lastSentAppearance = appearanceKey
-                }
-                if (lastSentHeadingUp != headingUp) {
-                    webView.evaluateJavascript("window.haulwaySetHeadingUp && window.haulwaySetHeadingUp(${if (headingUp) "true" else "false"})", null)
-                    lastSentHeadingUp = headingUp
-                }
-                if (lastSentFollowEnabled != followEnabled) {
-                    webView.evaluateJavascript("window.haulwaySetFollowMode && window.haulwaySetFollowMode(${if (followEnabled) "true" else "false"})", null)
-                    lastSentFollowEnabled = followEnabled
-                }
-                if (lastSentTilt3D != tilt3D) {
-                    webView.evaluateJavascript("window.haulwaySetTilt3D && window.haulwaySetTilt3D(${if (tilt3D) "true" else "false"})", null)
-                    lastSentTilt3D = tilt3D
-                }
-                if (searchLocation != null && searchLocation != lastSentSearchLocation) {
-                    webView.evaluateJavascript("window.haulwaySearchLocation && window.haulwaySearchLocation(${searchLocation.first},${searchLocation.second})", null)
-                    lastSentSearchLocation = searchLocation
+            }.also { cachedStyleJson = it }
+
+            val styleJson = JSONObject(rawStyle)
+                .put("projection", JSONObject().put("type", if (globeMode) "globe" else "mercator"))
+                .toString()
+
+            map.setStyle(Style.Builder().fromJson(styleJson)) { loadedStyle ->
+                styleReady = true
+                updateHaulwayNativeMapOverlays(
+                    loadedStyle,
+                    routeJson,
+                    latitude,
+                    longitude,
+                    searchLocation
+                )
+                android.util.Log.i(
+                    "HAULWAY_MAPLIBRE",
+                    "Native MapLibre style ready; projection=${if (globeMode) "globe" else "mercator"}"
+                )
+            }
+        } catch (error: Exception) {
+            styleError = error.localizedMessage ?: "Could not load the native map style."
+            android.util.Log.e("HAULWAY_MAPLIBRE", "Native map style load failed", error)
+            if (!globeMode) {
+                map.setStyle(HAULWAY_NATIVE_MAP_STYLE_URL) {
+                    styleReady = true
+                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, searchLocation)
                 }
             }
         }
+    }
+
+    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, searchLocation) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        if (!styleReady) return@LaunchedEffect
+        map.getStyle { style ->
+            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, searchLocation)
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, tilt3D) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        val camera = if (globeMode) {
+            CameraPosition.Builder()
+                .target(LatLng(15.0, 0.0))
+                .zoom(1.35)
+                .tilt(0.0)
+                .bearing(0.0)
+                .build()
+        } else {
+            val hasGps = latitude != null && longitude != null
+            val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else LatLng(53.4808, -2.2426)
+            val targetZoom = if (hasGps && followEnabled) 15.2 else (zoom + 6.0).coerceIn(3.0, 13.0)
+            CameraPosition.Builder()
+                .target(target)
+                .zoom(targetZoom)
+                .tilt(if (tilt3D && hasGps && followEnabled) 48.0 else 0.0)
+                .bearing(0.0)
+                .build()
+        }
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 450)
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF101B24))) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { mapView }
+        )
+        if (showGlobeControl) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
+                    .clickable { globeMode = !globeMode },
+                shape = RoundedCornerShape(9.dp),
+                color = Color(0xE9161D23),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8)),
+                shadowElevation = 5.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.Public, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+                    Text(if (globeMode) "MAP" else "GLOBE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (styleError != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
+                color = Color(0xDD18232D),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    styleError!!,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    maxLines = 2
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RealNavigationMap(
+    zoom: Int,
+    latitude: Double?,
+    longitude: Double?,
+    bearing: Float?,
+    accuracy: Float?,
+    followRequest: Int,
+    mapStyleRequest: Int,
+    headingUp: Boolean,
+    followEnabled: Boolean,
+    tilt3D: Boolean,
+    searchLocation: Pair<Double, Double>?
+) {
+    HaulwayNativeMapCanvas(
+        routeJson = RoutePlanStore.coordinatesJson,
+        latitude = latitude,
+        longitude = longitude,
+        bearing = bearing,
+        zoom = zoom,
+        followRequest = followRequest,
+        followEnabled = followEnabled,
+        tilt3D = tilt3D,
+        searchLocation = searchLocation,
+        showGlobeControl = true
     )
 }
-
-private val NAVIGATION_MAP_HTML = """
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#17232b"><link rel="icon" href="data:,"><style>
-*{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100%;height:100%;min-height:100%;overflow:hidden;background:#e8edf0;touch-action:none}#mapscene{position:absolute;inset:0;background:#e8edf0;transform:none;transform-origin:50% 50%;will-change:transform;backface-visibility:hidden}#tiles{position:absolute;inset:0;overflow:hidden;background:#142331}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:257px;height:257px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;transform:translateZ(0);image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#roadmarkers{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}.road-marker{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;font:bold 10px Arial;filter:drop-shadow(0 2px 3px #000c);white-space:nowrap}.road-marker.stop{width:31px;height:31px;background:#e31b23;color:#fff;border:2px solid #fff;clip-path:polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%)}.road-marker.giveway{width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-top:29px solid #e21b2d;filter:drop-shadow(0 0 2px #111)}.road-marker.giveway:after{content:'';position:absolute;top:-27px;left:-13px;border-left:13px solid transparent;border-right:13px solid transparent;border-top:23px solid #fff}.road-marker.speed{width:32px;height:32px;border-radius:50%;background:#fff;border:5px solid #d71920;color:#111;font-size:12px}.road-marker.camera{width:29px;height:29px;border-radius:50%;background:#f3d21b;border:2px solid #111;color:#111;font-size:15px}.road-marker.signal{width:18px;height:35px;border-radius:5px;background:#20252a;border:2px solid #eee;display:flex;flex-direction:column;gap:2px}.road-marker.signal:before,.road-marker.signal:after{content:'';width:8px;height:8px;border-radius:50%;background:#687078}.road-marker.signal span{width:8px;height:8px;border-radius:50%;background:#687078}.road-marker.camera{background:#f3d21b}.road-marker.parking,.road-marker.fuel,.road-marker.truckpark,.road-marker.poi{min-width:25px;height:25px;padding:0 4px;border:2px solid #fff;border-radius:4px;background:#087ccb;color:#fff;font-size:14px}.road-marker.fuel{background:#167b48}.road-marker.truckpark{background:#7650a8;font-size:10px}.road-marker.poi{background:#344b5d;font-size:11px}.road-marker-label{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:2px;padding:2px 4px;border-radius:3px;background:#081018dd;color:#fff;font:9px Arial}#mapstatus{position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;width:28px;height:36px;margin:-18px 0 0 -14px;filter:drop-shadow(0 4px 5px #000f);pointer-events:none;transform-origin:50% 50%}#streetbubble{position:absolute;z-index:30;display:none;max-width:220px;transform:translate(-50%,0);padding:5px 9px;border:1px solid rgba(111,190,235,.82);border-radius:7px;background:rgba(8,16,22,.58);color:#d9f1ff;font:700 12px Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px #000;box-shadow:0 2px 8px #0006;pointer-events:none}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:13px solid transparent;border-right:13px solid transparent;border-bottom:34px solid #078ee8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 2px 0 #00131f)}.vehicle:after{content:'';position:absolute;left:9px;top:10px;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:17px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
-#globeIntro{position:absolute;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse at 50% 42%,#102a43 0%,#07111d 58%,#03070d 100%);opacity:1;transition:opacity 1.8s ease;pointer-events:none}
-#globeIntro.hidden{opacity:0}
-#globeIntro svg{width:min(82vw,82vh);height:min(82vw,82vh);max-width:560px;max-height:560px;filter:drop-shadow(0 0 34px rgba(34,145,220,.38));animation:globeTurn 18s linear infinite}
-@keyframes globeTurn{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
-</style></head><body><div id="map"><div id="globeIntro" aria-hidden="true"><svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="earthFill" cx="34%" cy="28%" r="75%"><stop offset="0" stop-color="#4ba8d5"/><stop offset=".48" stop-color="#12608c"/><stop offset="1" stop-color="#061b36"/></radialGradient><linearGradient id="landFill" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8bbd83"/><stop offset="1" stop-color="#315f55"/></linearGradient><clipPath id="earthClip"><circle cx="250" cy="250" r="190"/></clipPath></defs><circle cx="250" cy="250" r="190" fill="url(#earthFill)" stroke="#6ec8ff" stroke-opacity=".55" stroke-width="2"/><g clip-path="url(#earthClip)" fill="url(#landFill)" stroke="#b4d6a0" stroke-opacity=".18" stroke-width="2"><path d="M75 130l25-28 39-12 25 12 7 27-17 18-8 31-23 12-11 35-22-9-5-28-21-14zM153 228l32 12 19 34-7 41-22 47-22-14-8-43-18-31zM222 95l36-19 46 8 29 25 43 4 27 32-22 21-35-7-24 18-29-11-19 18-30-11-20-29-30-8zM275 218l42-16 45 19 20 42-22 49-34 24-37-17-23-46zM366 350l35 7 19 28-20 24-31-10-16-26z"/></g><ellipse cx="250" cy="250" rx="190" ry="72" fill="none" stroke="#b6e4ff" stroke-opacity=".24" stroke-width="1.5" transform="rotate(-23 250 250)"/><path d="M80 250h340M250 60v380" stroke="#a8dfff" stroke-opacity=".13" stroke-width="1"/></svg></div><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><div id="roadmarkers"></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg></div><div id="vehicle" class="vehicle" style="display:none"></div><div id="streetbubble"></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© CARTO · © OpenStreetMap data · HAULWAY Dark</div></div>
-<script>
-(function(){'use strict';
-const root=document.getElementById('map'),scene=document.getElementById('mapscene'),world=document.getElementById('tileworld'),status=document.getElementById('mapstatus'),overlay=document.getElementById('overlay'),vehicle=document.getElementById('vehicle'),streetBubble=document.getElementById('streetbubble'),roadMarkers=document.getElementById('roadmarkers');
-console.log('HAULWAY native tile map script started');
- const CARTO_API_KEY=${JSONObject.quote(BuildConfig.CARTO_API_KEY)};
-window.addEventListener('error',e=>console.error('Map JS error: '+e.message+' line '+e.lineno));
-const cartoProviders=[
- {name:'HAULWAY Dark',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/dark_all/${'$'}{z}/${'$'}{x}/${'$'}{y}.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Voyager',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/rastertiles/voyager/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Light',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/light_all/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'}
-];
-const openStreetMapProvider={name:'OpenStreetMap fallback',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
-/* CARTO requires its own Basemaps key. Do not request CARTO tiles with an empty key:
-   they return HTTP 200 with an API KEY REQUIRED watermark. */
-const providers=CARTO_API_KEY ? [...cartoProviders,openStreetMapProvider] : [openStreetMapProvider];
-let provider=0,nightHighContrast=false,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=5,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,targetVehicle=null,vehicleAnimFrom=null,vehicleAnimStarted=0,vehicleAnimationFrame=0,autoFollow=true,firstFix=true,headingUp=true,tilt3D=true,drag=null,failed=0,loaded=0,providerTimer=null;
-let requestedZoom=16,globeTransitionStarted=false,globeZoomFrame=0,globeRevealFinished=false,globeIntroStartedAt=0,zoomVisualScale=1,zoomTransitionTimer=0;
-function finishGlobeReveal(){
- if(!globeTransitionStarted||globeRevealFinished)return;
- const wait=Math.max(0,2800-(performance.now()-globeIntroStartedAt));
- setTimeout(()=>{
-  if(globeRevealFinished)return;
-  const globe=document.getElementById('globeIntro');if(!globe)return;
-  globeRevealFinished=true;globe.classList.add('hidden');
-  setTimeout(()=>globe.remove(),1900);
- },wait);
-}
-window.haulwayStartRouteIntro=function(){
- // My Route owns a separate WebView and has no live GPS first-fix event.
- // Start the same globe reveal explicitly, then let the route's own tile load
- // determine when the globe overlay is removed.
- if(globeTransitionStarted)return;globeTransitionStarted=true;globeIntroStartedAt=performance.now();const globe=document.getElementById('globeIntro');
- if(!globe)return;
- const globeArt=globe.querySelector('svg');
- if(globeArt){
-  globeArt.style.animation='none';
-  globeArt.style.transform='scale(1)';
-  globeArt.style.transition='transform 3.4s cubic-bezier(.2,.65,.25,1)';
-  requestAnimationFrame(()=>{globeArt.style.transform='scale(2.15)';});
- }
-};
-function animateGlobeToLocation(){
- // Keep tile zoom integer and render only once. The previous animation changed the
- // tile zoom every frame (including fractional zoom levels), repeatedly cancelling
- // tile requests and asking tile servers for invalid fractional zoom URLs.
- if(globeTransitionStarted)return;globeTransitionStarted=true;globeIntroStartedAt=performance.now();const globe=document.getElementById('globeIntro');
- zoom=Math.round(clamp(requestedZoom,3,19));
- scheduleRender();
- if(!globe)return;
- const globeArt=globe.querySelector('svg');
- if(globeArt){
-  globeArt.style.animation='none';
-  globeArt.style.transform='scale(1)';
-  globeArt.style.transition='transform 4.2s cubic-bezier(.2,.65,.25,1)';
-  requestAnimationFrame(()=>{globeArt.style.transform='scale(3.25)';});
- }
- // Zoom the globe artwork, not the tile layer. Keep it visible until at least
- // one tile from the detailed location view has loaded successfully.
- globeZoomFrame=requestAnimationFrame(()=>{globeZoomFrame=0;});
-}
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
-function geoPoint(x,y,z){const n=256*Math.pow(2,z),lon=x/n*360-180,lat=Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI;return{lat,lon};}
-function size(){return{w:root.clientWidth,h:root.clientHeight};}
-let lastRenderSize='',renderQueued=false,renderGeneration=0;
-let roadFeatures=[],roadFetchAt=0,roadFetchCenter=null,roadFetchBusy=false;
-const overpassEndpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
-function roadFeatureKind(t){if(t.highway==='stop')return 'stop';if(t.highway==='give_way')return 'giveway';if(t.highway==='traffic_signals')return 'signal';if(t.highway==='speed_camera'||t.enforcement==='maxspeed')return 'camera';if(t.maxspeed)return 'speed';return null;}
-function poiFeatureKind(t){if(t.amenity==='fuel')return 'fuel';if(t.amenity==='parking'&&(String(t.hgv||t.truck||t.lorry||'').toLowerCase()==='yes'||String(t.access||'').toLowerCase()==='hgv'))return 'truckpark';if(t.amenity==='parking'||t.highway==='services'||t.highway==='rest_area'||t.amenity==='parking_space')return 'parking';if(t.amenity==='toilets')return 'poi-toilet';if(t.amenity==='restaurant'||t.amenity==='fast_food'||t.amenity==='cafe')return 'poi-food';if(t.shop)return 'poi-shop';if(t.amenity==='car_repair'||t.shop==='car_repair')return 'poi-repair';if(t.amenity==='car_wash')return 'poi-wash';if(t.amenity==='weighbridge'||t.man_made==='weighbridge')return 'poi-weigh';if(t.amenity==='truck_stop'||t.amenity==='vehicle_inspection')return 'truckpark';if(t.tourism==='hotel'||t.tourism==='motel')return 'poi-rest';return null;}
-function roadFeatureLabel(k,t){if(k==='stop')return 'STOP';if(k==='giveway'||k==='signal')return '';if(k==='speed')return String(t.maxspeed).replace(/[^0-9]/g,'').slice(0,3)||'!';if(k==='camera')return '⌁';if(k==='fuel')return '⛽';if(k==='truckpark')return 'HGV';if(k==='parking')return 'P';if(k==='poi-toilet')return 'WC';if(k==='poi-food')return '🍴';if(k==='poi-shop')return '▣';if(k==='poi-repair')return '🔧';if(k==='poi-wash')return 'W';if(k==='poi-weigh')return '⚖';if(k==='poi-rest')return '🛏';return '•';}
-function pointToWayMetres(lat,lon,geometry){
- const mx=111320*Math.cos(lat*Math.PI/180),my=111320;let best=Infinity;
- for(let i=1;i<geometry.length;i++){const a=geometry[i-1],b=geometry[i],ax=(a.lon-lon)*mx,ay=(a.lat-lat)*my,bx=(b.lon-lon)*mx,by=(b.lat-lat)*my,dx=bx-ax,dy=by-ay,len=dx*dx+dy*dy,t=len>0?clamp(-(ax*dx+ay*dy)/len,0,1):0;best=Math.min(best,Math.hypot(ax+t*dx,ay+t*dy));if(best<2)break;}
- return best;
-}
-function routeMatchScore(geometry){
- if(routeCoords.length<2||geometry.length<2)return {matches:0,total:0};
- const stride=Math.max(1,Math.floor(routeCoords.length/120));let matches=0,total=0;
- for(let i=0;i<routeCoords.length;i+=stride){const p=routeCoords[i];total++;if(pointToWayMetres(p[0],p[1],geometry)<=9)matches++;}
- const last=routeCoords[routeCoords.length-1];if((routeCoords.length-1)%stride!==0){total++;if(pointToWayMetres(last[0],last[1],geometry)<=9)matches++;}
- return {matches,total};
-}
-function routeDistanceMetres(lat,lon){let best=Infinity;for(let i=1;i<routeCoords.length;i++){const a=routeCoords[i-1],b=routeCoords[i],mx=111320*Math.cos(lat*Math.PI/180),ax=(a[1]-lon)*mx,ay=(a[0]-lat)*111320,bx=(b[1]-lon)*mx,by=(b[0]-lat)*111320,dx=bx-ax,dy=by-ay,len=dx*dx+dy*dy,t=len>0?clamp(-(ax*dx+ay*dy)/len,0,1):0;best=Math.min(best,Math.hypot(ax+t*dx,ay+t*dy));}return best;}
-function routeRelevantRoadFeatures(){return routeCoords.length<2?[]:roadFeatures;}
-function refreshRoadData(){
- const now=Date.now();if(routeCoords.length<2){roadFeatures=[];drawRoadMarkers();return;}
- if(zoom<13||roadFetchBusy||now-roadFetchAt<45000)return;
- if(roadFetchCenter&&Math.abs(center.lat-roadFetchCenter.lat)<0.008&&Math.abs(center.lon-roadFetchCenter.lon)<0.008)return;
- roadFetchAt=now;roadFetchCenter={lat:center.lat,lon:center.lon};roadFetchBusy=true;
- const box=(center.lat-0.008)+','+(center.lon-0.012)+','+(center.lat+0.008)+','+(center.lon+0.012);
- const q='[out:json][timeout:18];(way[highway]('+box+');node[highway~"^(stop|give_way|traffic_signals|speed_camera)$"]('+box+');node[enforcement="maxspeed"]('+box+');node[maxspeed]('+box+');node[amenity]('+box+');node[shop]('+box+');node[tourism]('+box+');node[highway~"^(services|rest_area)$"]('+box+');way[amenity]('+box+');way[shop]('+box+');way[tourism]('+box+');way[highway~"^(services|rest_area)$"]('+box+'););out body center geom;';
- let endpoint=0;
- const request=()=>fetch(overpassEndpoints[endpoint],{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q)}).then(r=>{if(!r.ok)throw Error('Overpass HTTP '+r.status);return r.json();}).then(data=>{
-  const elements=data.elements||[],ways=elements.filter(e=>e.type==='way'&&e.tags&&e.tags.highway&&Array.isArray(e.geometry)),matchedWays=new Map();
-  for(const way of ways){const score=routeMatchScore(way.geometry);if(score.matches>=Math.max(2,Math.ceil(score.total*.35)))matchedWays.set(way.id,way);}
-  const roadNodeIds=new Set();for(const way of matchedWays.values())for(const id of (way.nodes||[]))roadNodeIds.add(id);
-  const seen=new Set(),features=[];
-  for(const el of elements){if(el.type!=='node'||!roadNodeIds.has(el.id))continue;const t=el.tags||{},kind=roadFeatureKind(t);if(!kind||!Number.isFinite(el.lat)||!Number.isFinite(el.lon))continue;const key=kind+':'+el.id;if(seen.has(key))continue;seen.add(key);features.push({lat:el.lat,lon:el.lon,kind,label:roadFeatureLabel(kind,t),name:t.name||'',maxspeed:t.maxspeed||''});}
-  for(const way of matchedWays.values()){const t=way.tags||{};if(!t.maxspeed||!way.geometry.length)continue;const p=way.geometry[Math.floor(way.geometry.length/2)],key='speed-way:'+way.id;if(seen.has(key))continue;seen.add(key);features.push({lat:p.lat,lon:p.lon,kind:'speed',label:roadFeatureLabel('speed',t),name:t.name||'',maxspeed:t.maxspeed});}
-  // POIs are a separate corridor layer: unlike regulatory road signs, they may sit
-  // beside the route. Keep only mapped places within 1.2 km of the active route.
-  const poiSeen=new Set();for(const el of elements){if(el.type!=='node'&&el.type!=='way')continue;const t=el.tags||{},kind=poiFeatureKind(t);if(!kind)continue;const lat=el.type==='node'?el.lat:(el.center&&el.center.lat),lon=el.type==='node'?el.lon:(el.center&&el.center.lon);if(!Number.isFinite(lat)||!Number.isFinite(lon)||routeDistanceMetres(lat,lon)>1200)continue;const key='poi:'+el.type+':'+el.id;if(poiSeen.has(key))continue;poiSeen.add(key);features.push({lat,lon,kind,label:roadFeatureLabel(kind,t),name:t.name||t.brand||'',maxspeed:''});}
-  roadFeatures=features;drawRoadMarkers();console.log('HAULWAY route overlay: '+features.length+' signs/POIs; '+matchedWays.size+' exact-route OSM ways');
- }).catch(err=>{if(endpoint<overpassEndpoints.length-1){endpoint++;return request();}console.warn('OSM route signs unavailable: '+err.message);}).finally(()=>{roadFetchBusy=false;});
- request();
-}
-function drawRoadMarkers(){
- roadMarkers.textContent='';if(routeCoords.length<2)return;const sz=size();
- for(const f of routeRelevantRoadFeatures()){const p=screenPoint(f.lat,f.lon);if(p.x < -35||p.y < -40||p.x>sz.w+35||p.y>sz.h+40)continue;const el=document.createElement('div');el.className='road-marker '+f.kind+((f.kind.startsWith('poi-'))?' poi':'');el.style.left=p.x+'px';el.style.top=p.y+'px';if(f.kind==='signal'){const lamp=document.createElement('span');el.appendChild(lamp);}else if(f.kind!=='giveway'){el.textContent=f.label;}el.title=f.kind==='speed'?'Speed limit '+f.maxspeed:(f.name||f.kind);if(f.kind==='speed'){const label=document.createElement('small');label.className='road-marker-label';label.textContent=f.maxspeed;el.appendChild(label);}roadMarkers.appendChild(el);}
-}
-
-function scheduleRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;render();});}
-function showStatus(t){status.textContent=t;status.style.display='block';}
-window.haulwayResize=function(){const s=size();if(s.w>0&&s.h>0){const key=s.w+'x'+s.h;if(key!==lastRenderSize){lastRenderSize=key;render();}}};
-const mapResizeObserver=new ResizeObserver(()=>window.haulwayResize());
-mapResizeObserver.observe(root);
-function render(){
- const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
- renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
- const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
- const x0=Math.floor(left/256),y0=Math.floor(top/256),x1=Math.floor((left+sz.w-1)/256),y1=Math.floor((top+sz.h-1)/256),max=Math.pow(2,zoom);
- // Reposition cached tiles first. They remain visible outside the exact viewport
- // and are clipped by the map viewport, so the old imagery stays under new tiles.
- for(const [cachedKey,cachedNode] of tileCache){
-   const p=cachedKey.split('|');
-   if(Number(p[0])===provider&&Number(p[1])===zoom){
-     const tx=Number(p[2]),ty=Number(p[3]);
-     let dx=tx-x0;
-     if(dx>max/2)dx-=max;else if(dx< -max/2)dx+=max;
-     cachedNode.style.left=Math.round(dx*256-(left-x0*256))+'px';
-     cachedNode.style.top=Math.round((ty-y0)*256-(top-y0*256))+'px';
-     cachedNode.style.zIndex='2';
-     if(cachedNode.parentNode!==world)world.appendChild(cachedNode);
-   }
- }
- function finish(){if(generation!==renderGeneration||pending>0)return;
-   if(failedNow>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();return;}
-   const fullCoverage=loadedNow===wanted.size&&failedNow===0;
-   const hasFallback=[...tileCache.entries()].some(([key,node])=>{
-     const p=key.split('|');return (Number(p[0])!==provider||Number(p[1])!==zoom)&&node.complete&&node.naturalWidth>0;
-   });
-   if(loadedNow>0){status.style.display='none';finishGlobeReveal();}
-   // During zoom, keep the previous complete map visible until every target tile
-   // has arrived. Never replace a complete map with a partial square of tiles.
-   if(zoomVisualScale!==1&&hasFallback&&!fullCoverage){
-     for(const [key,node] of tileCache){
-       const p=key.split('|');
-       if(Number(p[0])===provider&&Number(p[1])===zoom)node.style.visibility='hidden';
-     }
-     showStatus('LOADING MAP DETAILS…');
-   }else{
-     for(const [key,node] of tileCache){
-       const p=key.split('|');
-       if(Number(p[0])===provider&&Number(p[1])===zoom)node.style.visibility='visible';
-       else{node.remove();tileCache.delete(key);}
-     }
-     if(zoomVisualScale!==1&&fullCoverage){
-       zoomVisualScale=1;
-       scene.style.transition='transform 420ms cubic-bezier(.2,.75,.25,1)';
-       applyMapOrientation();
-       setTimeout(()=>{scene.style.transition='';applyMapOrientation();},440);
-     }
-   }
-   // Bound memory on long journeys; retain the newest 96 tiles.
-   while(tileCache.size>96){
-     const oldest=tileCache.keys().next().value;
-     const node=tileCache.get(oldest);if(node)node.remove();
-     tileCache.delete(oldest);
-   }
-   if(loadedNow===0&&failedNow>0)showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');
-   console.log('Map tile layer ready: provider='+providers[provider].name+', '+loadedNow+'/'+wanted.size+' loaded, '+failedNow+' failed; cached='+tileCache.size);
- }
- for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
-   if(y<0||y>=max)continue;const xx=((x%max)+max)%max,key=provider+'|'+zoom+'|'+xx+'|'+y;wanted.add(key);
-   let im=tileCache.get(key),isNew=!im;
-   if(!im){im=document.createElement('img');im.className='tile';im.draggable=false;im.dataset.tileKey=key;tileCache.set(key,im);}
-   else{tileCache.delete(key);tileCache.set(key,im);}
-   if(im.complete&&im.naturalWidth>0){loadedNow++;}
-   else if(im.complete&&im.naturalWidth===0&&im.src){failedNow++;}
-   else {
-     pending++;
-     im.onload=()=>{if(generation!==renderGeneration)return;pending--;loadedNow++;im.classList.remove('failed');finish();};
-     im.onerror=()=>{if(generation!==renderGeneration)return;pending--;failedNow++;im.classList.add('failed');finish();};
-   }
-   im.style.left=Math.round(x*256-left)+'px';im.style.top=Math.round(y*256-top)+'px';im.style.zIndex='2';
-   // Night mode uses the light CARTO basemap with a controlled color inversion:
-   // dark street lettering becomes pale/white while the map background becomes dark.
-   im.style.filter=nightHighContrast?'invert(1) hue-rotate(180deg) brightness(.82) contrast(1.08)':'none';
-   if(zoomVisualScale!==1&&im.src)im.style.visibility='hidden';
-   if(im.parentNode!==world)world.appendChild(im);
-   if(isNew)im.src=providers[provider].url(zoom,xx,y);
-   nextTiles.push(im);
- }
- tiles=nextTiles;
- if(providerTimer)clearTimeout(providerTimer);
- providerTimer=setTimeout(()=>{if(generation!==renderGeneration)return;if(pending>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();}else if(loadedNow===0){showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');}},9000);
- finish();drawOverlays();
-}
-function screenPoint(lat,lon){const p=worldPoint(lat,lon,zoom),c=worldPoint(center.lat,center.lon,zoom),s=size();return{x:p.x-c.x+s.w/2,y:p.y-c.y+(autoFollow?s.h*.70:s.h*.50)};}
-function applyMapOrientation(){const camera=tilt3D&&autoFollow?'perspective(1400px) rotateX(32deg) scale(1.62)':'';const zoomScale=zoomVisualScale!==1?' scale('+zoomVisualScale+')':'';scene.style.transform=(camera+zoomScale)||'none';scene.style.transformOrigin='50% 50%';scene.style.perspective='none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
-let lastStreetLookupAt=0,lastStreetLookupPoint=null,streetLookupBusy=false;
- function refreshStreetName(lat,lon){
-  const now=Date.now();
-  if(streetLookupBusy||now-lastStreetLookupAt<15000)return;
-  if(lastStreetLookupPoint&&Math.abs(lat-lastStreetLookupPoint.lat)<0.00035&&Math.abs(lon-lastStreetLookupPoint.lon)<0.00035)return;
-  lastStreetLookupAt=now;lastStreetLookupPoint={lat,lon};streetLookupBusy=true;
-  fetch('https://photon.komoot.io/reverse?lat='+encodeURIComponent(lat)+'&lon='+encodeURIComponent(lon)+'&lang=en')
-   .then(r=>{if(!r.ok)throw Error('reverse geocode '+r.status);return r.json();})
-   .then(data=>{const p=data.features&&data.features[0]&&data.features[0].properties||{};const road=(p.street||'').trim();if(road){streetBubble.textContent=road;streetBubble.style.display='block';streetBubble.style.visibility='visible';drawOverlays();}else{streetBubble.textContent='';streetBubble.style.display='none';}})
-   .catch(()=>{streetBubble.style.display='none';})
-   .finally(()=>{streetLookupBusy=false;});
- }
- function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.70}:screenPoint(lastVehicle.lat,lastVehicle.lon);const panX=(typeof panOffset!=='undefined'?panOffset.x:0),panY=(typeof panOffset!=='undefined'?panOffset.y:0);vehicle.style.display='block';vehicle.style.left=(p.x+panX)+'px';vehicle.style.top=(p.y+panY)+'px';if(streetBubble.textContent.trim()){streetBubble.style.display='block';streetBubble.style.visibility='visible';streetBubble.style.left=(p.x+panX)+'px';streetBubble.style.top=(p.y+panY+30)+'px';}}applyMapOrientation();drawRoadMarkers();refreshRoadData(); }
-function setCenter(lat,lon,follow=false){center={lat:clamp(lat,-85,85),lon:lon};if(follow)autoFollow=true;render();}
-function animateZoomTo(targetZoom){
- targetZoom=clamp(Math.round(targetZoom),3,19);
- if(targetZoom===zoom)return;
- if(zoomTransitionTimer){clearTimeout(zoomTransitionTimer);zoomTransitionTimer=0;}
- const delta=targetZoom-zoom;
- // Scale the existing map continuously first; fetch the new integer tile level only
- // once per completed gesture. This avoids fractional tile URLs and repeated reloads.
- zoomVisualScale=Math.pow(2,delta);
- scene.style.transition='transform 720ms cubic-bezier(.22,.68,.24,1)';
- applyMapOrientation();
- zoomTransitionTimer=setTimeout(()=>{
-   zoomTransitionTimer=0;zoom=targetZoom;
-   scene.style.transition='';
-   scheduleRender();
- },720);
-}
-window.haulwaySetZoom=function(offset){
- requestedZoom=clamp(12+Number(offset||0),3,19);
- if(!lastVehicle)return;
- if(globeZoomFrame)cancelAnimationFrame(globeZoomFrame);
- animateZoomTo(requestedZoom);
-};
-window.haulwaySetRoute=function(json){try{const raw=JSON.parse(json);routeCoords=raw.map(c=>[Number(c[1]),Number(c[0])]).filter(c=>Number.isFinite(c[0])&&Number.isFinite(c[1]));roadFetchAt=0;roadFetchCenter=null;roadFeatures=[];roadFetchAt=0;roadFetchCenter=null;roadFeatures=[];if(routeCoords.length<2)throw Error('Route geometry empty');if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);}else{const lats=routeCoords.map(c=>c[0]),lons=routeCoords.map(c=>c[1]);center={lat:(Math.min(...lats)+Math.max(...lats))/2,lon:(Math.min(...lons)+Math.max(...lons))/2};const span=Math.max(Math.abs(Math.max(...lats)-Math.min(...lats)),Math.abs(Math.max(...lons)-Math.min(...lons)));zoom=clamp(Math.floor(Math.log2(360/Math.max(span,.002)))-1,5,16);}scheduleRender();}catch(e){showStatus('ROUTE DISPLAY ERROR');console.error('Route error '+e);}};
-window.haulwayClearRoute=function(){routeCoords=[];roadFeatures=[];roadMarkers.textContent='';roadFetchAt=0;roadFetchCenter=null;center={lat:53.4808,lon:-2.2426};zoom=4;autoFollow=false;scheduleRender();};
-function animateVehicleFrame(now){
- if(!targetVehicle||!lastVehicle){vehicleAnimationFrame=0;return;}
- // Follow a continuously moving target instead of restarting a short animation
- // on every 1-second GPS callback. This removes the visible stop-and-jump effect.
- const dt=Math.min(48,Math.max(8,now-(vehicleAnimStarted||now)));vehicleAnimStarted=now;
- const alpha=1-Math.exp(-dt/520);
- const lonDelta=((targetVehicle.lon-lastVehicle.lon+540)%360)-180;
- const latDelta=targetVehicle.lat-lastVehicle.lat;
- const lonStep=lonDelta*alpha;
- let bearing=lastVehicle.bearing;
- if(Number.isFinite(targetVehicle.bearing)){
-   if(Number.isFinite(bearing)){const d=((targetVehicle.bearing-bearing+540)%360)-180;bearing=(bearing+d*alpha+360)%360;}
-   else bearing=targetVehicle.bearing;
- }
- lastVehicle={lat:lastVehicle.lat+latDelta*alpha,lon:lastVehicle.lon+lonStep,bearing,accuracy:targetVehicle.accuracy};
- const remaining=Math.abs(latDelta)+Math.abs(lonDelta);
- if(autoFollow){
-   center={lat:lastVehicle.lat,lon:lastVehicle.lon};
-   const base=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),current=worldPoint(center.lat,center.lon,zoom),dx=base.x-current.x,dy=base.y-current.y;
-   if(!drag){world.style.transform='translate3d('+dx+'px,'+dy+'px,0)';}
- }
- drawOverlays();
- if(remaining>0.000002|| (Number.isFinite(targetVehicle.bearing)&&Number.isFinite(lastVehicle.bearing)&&Math.abs(((targetVehicle.bearing-lastVehicle.bearing+540)%360)-180)>.15)){
-   vehicleAnimationFrame=requestAnimationFrame(animateVehicleFrame);
- }else{
-   lastVehicle=targetVehicle;vehicleAnimationFrame=0;vehicleAnimStarted=0;
- }
-}
-window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){
- if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
- const next={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy};
- refreshStreetName(lat,lon);
- if(!lastVehicle){
-   lastVehicle=next;targetVehicle=next;vehicleAnimFrom=next;
-   if(autoFollow){center={lat:clamp(lat,-85,85),lon};if(firstFix){firstFix=false;animateGlobeToLocation();}}
-   scheduleRender();drawOverlays();return;
- }
- targetVehicle=next;
- if(!vehicleAnimationFrame){vehicleAnimStarted=performance.now();vehicleAnimationFrame=requestAnimationFrame(animateVehicleFrame);}
-};
-window.haulwaySearchLocation=function(lat,lon){if(!Number.isFinite(lat)||!Number.isFinite(lon))return;autoFollow=false;center={lat:clamp(lat,-85,85),lon:lon};zoom=Math.max(zoom,16);scheduleRender();};
-window.haulwayFollowRequest=function(){userPannedMap=false;autoFollow=true;if(lastVehicle){const oldZoom=zoom;center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);if(zoom!==oldZoom){scheduleRender();}else{const a=worldPoint(renderedCenter.lat,renderedCenter.lon,zoom),b=worldPoint(center.lat,center.lon,zoom);world.style.transform='translate3d('+(a.x-b.x)+'px,'+(a.y-b.y)+'px,0)';drawOverlays();}}applyMapOrientation();};
-window.haulwaySetFollowMode=function(enabled){userPannedMap=!enabled;autoFollow=!!enabled;if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);scheduleRender();}else{drawOverlays();}applyMapOrientation();};
-window.haulwaySetTilt3D=function(enabled){tilt3D=!!enabled;applyMapOrientation();};
-window.haulwayApplyAppearance=function(mode,style){
- const isNight=mode==='Night'||(mode==='Auto'&&(new Date().getHours()>=19||new Date().getHours()<7));
- const target=isNight?2:(mode==='Day'?1:1);
- const nextNight=isNight;
- const changed=provider!==target||nightHighContrast!==nextNight;
- provider=target;nightHighContrast=nextNight;
- if(changed){
-  const attr=document.querySelector('.attribution');
-  if(attr)attr.textContent=providers[provider].attr+' · '+(nightHighContrast?'HAULWAY Night High Contrast':providers[provider].name);
-  showStatus(nightHighContrast?'LOADING NIGHT HIGH-CONTRAST MAP…':'LOADING '+providers[provider].name.toUpperCase()+'…');
-  render();
- }
-};
-window.haulwaySetMapStyleRequest=function(){
- if(!CARTO_API_KEY){showStatus('CARTO API KEY MISSING — ADD CARTO_API_KEY TO local.properties OR GITHUB SECRET');console.warn('Layers unavailable: CARTO_API_KEY was empty at build time');return;}
- // The Layers control cycles only the three CARTO basemaps. OSM is fallback-only.
- provider=(provider+1)%cartoProviders.length;
- const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[provider].attr+' · '+providers[provider].name;
- showStatus('LOADING '+providers[provider].name.toUpperCase()+'…');render();
-};
-window.haulwaySetHeadingUp=function(enabled){headingUp=!!enabled;applyMapOrientation();};
-let panFrame=0,panVelocity={x:0,y:0},lastPointer={x:0,y:0,t:0},panOffset={x:0,y:0},userPannedMap=false;
-function applyPanTransform(){
- const tr=`translate3d(${'$'}{panOffset.x}px,${'$'}{panOffset.y}px,0)`;
- world.style.transform=tr;overlay.style.transform='none';drawOverlays();
-}
-function commitPan(){
- if(panFrame){cancelAnimationFrame(panFrame);panFrame=0;}
- if(panOffset.x===0&&panOffset.y===0)return;
- const a=worldPoint(center.lat,center.lon,zoom);
- center=geoPoint(a.x-panOffset.x,a.y-panOffset.y,zoom);
- panOffset={x:0,y:0};world.style.transform='none';overlay.style.transform='none';
- vehicle.style.transform=headingUp&&lastVehicle&&Number.isFinite(lastVehicle.bearing)?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';
- render();
-}
-root.addEventListener('pointerdown',e=>{
- if(panFrame){cancelAnimationFrame(panFrame);panFrame=0;}
- drag={startX:e.clientX,startY:e.clientY};panOffset={x:0,y:0};panVelocity={x:0,y:0};
- lastPointer={x:e.clientX,y:e.clientY,t:performance.now()};root.setPointerCapture(e.pointerId);autoFollow=false;userPannedMap=true;applyMapOrientation();
-});
-root.addEventListener('pointermove',e=>{
- if(!drag)return;
- const now=performance.now(),dt=Math.max(1,now-lastPointer.t),dx=e.clientX-lastPointer.x,dy=e.clientY-lastPointer.y;
- panVelocity={x:dx/dt,y:dy/dt};lastPointer={x:e.clientX,y:e.clientY,t:now};
- panOffset={x:e.clientX-drag.startX,y:e.clientY-drag.startY};applyPanTransform();
-});
-function finishDrag(e){
- if(!drag)return;drag=null;
- if(Math.abs(panOffset.x)+Math.abs(panOffset.y)<3){panOffset={x:0,y:0};return;}
- let vx=panVelocity.x*16,vy=panVelocity.y*16;
- const step=()=>{panOffset.x+=vx;panOffset.y+=vy;vx*=0.90;vy*=0.90;applyPanTransform();
-  if(Math.hypot(vx,vy)>0.32){panFrame=requestAnimationFrame(step);}else{panFrame=0;commitPan();}
- };
- panFrame=requestAnimationFrame(step);
-}
-root.addEventListener('pointerup',finishDrag);root.addEventListener('pointercancel',finishDrag);
-root.addEventListener('wheel',e=>{e.preventDefault();animateZoomTo(zoom+(e.deltaY<0?1:-1));},{passive:false});
-window.addEventListener('resize',()=>{const s=size();if(s.w>0&&s.h>0){const key=s.w+'x'+s.h;if(key!==lastRenderSize){lastRenderSize=key;render();}else{drawOverlays();}}});
-console.log('Map engine ready: built-in tile renderer; zoom='+zoom);
-function waitForMapSize(){const s=size();if(s.w>0&&s.h>0){lastRenderSize=s.w+'x'+s.h;render();console.log('Map viewport ready: '+lastRenderSize);}else{requestAnimationFrame(waitForMapSize);}}
-requestAnimationFrame(waitForMapSize);
-})();
-</script></body></html>
-""".trimIndent()
 
 @Composable
 private fun DeviceStatusHeader(modifier: Modifier = Modifier) {
@@ -1947,57 +1742,15 @@ private fun HaulwayHomeScreen(onNavigate: (String) -> Unit) {
     }
 }
 
+
 @Composable
 private fun RoutePlannerMapView(routeJson: String?) {
-    var mapView by remember { mutableStateOf<WebView?>(null) }
-    var pageReady by remember { mutableStateOf(false) }
-    var lastRoute by remember { mutableStateOf<String?>(null) }
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-            WebView(ctx).apply {
-                setBackgroundColor(android.graphics.Color.rgb(23, 35, 43))
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.loadsImagesAutomatically = true
-                settings.blockNetworkImage = false
-                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                isVerticalScrollBarEnabled = false
-                isHorizontalScrollBarEnabled = false
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView, url: String?) {
-                        pageReady = true
-                        android.util.Log.i("HAULWAY_ROUTE_MAP", "Shared map engine ready")
-                        view.evaluateJavascript("window.haulwayStartRouteIntro && window.haulwayStartRouteIntro()", null)
-                        val route = routeJson
-                        if (route.isNullOrBlank()) {
-                            view.evaluateJavascript("window.haulwayClearRoute && window.haulwayClearRoute()", null)
-                            lastRoute = null
-                        } else {
-                            view.evaluateJavascript("window.haulwaySetRoute && window.haulwaySetRoute(${JSONObject.quote(route)})", null)
-                            lastRoute = route
-                        }
-                    }
-                    override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
-                        android.util.Log.e("HAULWAY_ROUTE_MAP", "Map resource error ${error.errorCode}: ${error.description} ${request.url}")
-                    }
-                }
-                mapView = this
-                loadDataWithBaseURL("file:///android_asset/", NAVIGATION_MAP_HTML, "text/html", "UTF-8", null)
-            }
-        },
-        update = { view ->
-            if (pageReady && mapView === view && routeJson != lastRoute) {
-                if (routeJson.isNullOrBlank()) {
-                    view.evaluateJavascript("window.haulwayClearRoute && window.haulwayClearRoute()", null)
-                } else {
-                    view.evaluateJavascript("window.haulwaySetRoute && window.haulwaySetRoute(${JSONObject.quote(routeJson)})", null)
-                }
-                lastRoute = routeJson
-            }
-        }
+    HaulwayNativeMapCanvas(
+        routeJson = routeJson,
+        zoom = 0,
+        followEnabled = false,
+        tilt3D = false,
+        showGlobeControl = false
     )
 }
 

@@ -72,6 +72,7 @@ android {
 }
 
 dependencies {
+    implementation("org.maplibre.gl:android-sdk-opengl:2026.10.19-globe")
     implementation("androidx.compose.material:material-icons-extended")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
