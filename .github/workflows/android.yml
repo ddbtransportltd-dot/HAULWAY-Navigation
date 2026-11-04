@@ -1,4 +1,5 @@
 name: HAULWAY Android Build
+run-name: HAULWAY Android Build - ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
