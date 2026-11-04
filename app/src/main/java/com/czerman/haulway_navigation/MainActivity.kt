@@ -1420,9 +1420,15 @@ function render(){
  function finish(){if(generation!==renderGeneration||pending>0)return;
    if(failedNow>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();return;}
    if(loadedNow>0){status.style.display='none';}
-   // Retain only visible tiles after the replacement set is ready. This avoids blank frames.
-   for(const [key,node] of tileCache){if(!wanted.has(key)){node.remove();tileCache.delete(key);}}
-   if(loadedNow===0&&failedNow>0)showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');
+   // Keep the last successfully rendered map when a replacement tile set fails.
+   // A temporary network/provider failure must never erase the only usable map.
+   if(loadedNow>0){
+     for(const [key,node] of tileCache){if(!wanted.has(key)){node.remove();tileCache.delete(key);}}
+   }
+   if(loadedNow===0&&failedNow>0){
+     if(tileCache.size===0)showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');
+     else showStatus('MAP CONNECTION LOST — SHOWING LAST AVAILABLE MAP');
+   }
    console.log('Map tile layer ready: provider='+providers[provider].name+', '+loadedNow+' loaded, '+failedNow+' failed; cached='+tileCache.size);
  }
  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
