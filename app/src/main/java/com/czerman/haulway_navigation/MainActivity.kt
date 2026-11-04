@@ -1350,12 +1350,12 @@ private fun updateHaulwayNativeMapOverlays(
             }
             val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = android.graphics.Color.rgb(0, 145, 235)
-                style = android.graphics.Paint.Style.FILL
+                setStyle(android.graphics.Paint.Style.FILL)
             }
             canvas.drawPath(arrow, fill)
             val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 color = android.graphics.Color.WHITE
-                style = android.graphics.Paint.Style.STROKE
+                setStyle(android.graphics.Paint.Style.STROKE)
                 strokeWidth = 5f
             }
             canvas.drawPath(arrow, outline)
