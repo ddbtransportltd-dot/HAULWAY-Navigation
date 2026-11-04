@@ -755,20 +755,20 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             speechReady = false
         }
     }
-    LaunchedEffect(liveLatitude, liveLongitude) {
-        val lat = liveLatitude ?: return@LaunchedEffect
-        val lon = liveLongitude ?: return@LaunchedEffect
-        val now = System.currentTimeMillis()
-        if (now - lastRoadLookupAt < 20_000L) return@LaunchedEffect
-        lastRoadLookupAt = now
-        kotlinx.coroutines.delay(900)
-        val result = lookupRoadContext(lat, lon)
-        if (result != null) {
-            currentRoadName = result.name
-            currentSpeedLimit = result.speedLimit
-        } else {
-            currentRoadName = "Road name unavailable"
-            currentSpeedLimit = null
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(20_000L)
+            val lat = liveLatitude ?: continue
+            val lon = liveLongitude ?: continue
+            lastRoadLookupAt = System.currentTimeMillis()
+            val result = lookupRoadContext(lat, lon)
+            if (result != null) {
+                currentRoadName = result.name
+                currentSpeedLimit = result.speedLimit
+            } else {
+                currentRoadName = "Road name unavailable"
+                currentSpeedLimit = null
+            }
         }
     }
 
