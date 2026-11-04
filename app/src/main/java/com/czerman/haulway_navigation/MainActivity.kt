@@ -1718,6 +1718,7 @@ private fun HaulwayHomeScreen(onNavigate: (String) -> Unit) {
 
 @Composable
 private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTrafficIncident> = emptyList(), onViewportBounds: (String) -> Unit = {}) {
+    val viewportCallback = onViewportBounds
     var mapView by remember { mutableStateOf<WebView?>(null) }
     var pageReady by remember { mutableStateOf(false) }
     var lastRoute by remember { mutableStateOf<String?>(null) }
@@ -1748,7 +1749,7 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                 addJavascriptInterface(object {
                     @JavascriptInterface
                     fun onViewportBounds(json: String) {
-                        android.os.Handler(Looper.getMainLooper()).post { onViewportBounds(json) }
+                        android.os.Handler(Looper.getMainLooper()).post { viewportCallback(json) }
                     }
                 }, "HaulwayViewportBridge")
                 settings.loadsImagesAutomatically = true
