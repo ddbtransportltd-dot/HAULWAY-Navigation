@@ -3,7 +3,7 @@ name: HAULWAY Android Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, vision-19-route-intelligence]
 
 permissions:
   contents: read
