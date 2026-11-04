@@ -1400,7 +1400,7 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
 function geoPoint(x,y,z){const n=256*Math.pow(2,z),lon=x/n*360-180,lat=Math.atan(Math.sinh(Math.PI*(1-2*y/n)))*180/Math.PI;return{lat,lon};}
 function size(){return{w:root.clientWidth,h:root.clientHeight};}
-let lastRenderSize='',renderQueued=false,renderGeneration=0;
+let lastRenderSize='',renderQueued=false,renderGeneration=0,lastViewportPayload='';
 let roadFeatures=[],roadFetchAt=0,roadFetchCenter=null,roadFetchBusy=false,trafficFeatures=[];
 const overpassEndpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
 function roadFeatureKind(t){if(t.highway==='stop')return 'stop';if(t.highway==='give_way')return 'giveway';if(t.highway==='traffic_signals')return 'signal';if(t.highway==='speed_camera'||t.enforcement==='maxspeed')return 'camera';if(t.maxspeed)return 'speed';if(t.amenity==='parking'&&(/hgv|truck|lorry/i.test((t.access||'')+' '+(t.hgv||'')+' '+(t.name||'')+' '+(t.parking||''))))return 'truckpark';if(t.amenity==='parking'||t.highway==='rest_area'||t.highway==='services')return 'parking';if(t.amenity==='fuel')return 'fuel';if(t.amenity||t.shop||t.tourism||t.leisure)return 'poi';return null;}
@@ -1417,7 +1417,7 @@ const mapResizeObserver=new ResizeObserver(()=>window.haulwayResize());
 mapResizeObserver.observe(root);
 function render(){
  const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
- try{const nw=geoPoint(left,top,zoom),se=geoPoint(left+sz.w,top+sz.h,zoom);if(window.HaulwayViewportBridge&&window.HaulwayViewportBridge.onViewportBounds)window.HaulwayViewportBridge.onViewportBounds(JSON.stringify({west:nw.lon,north:nw.lat,east:se.lon,south:se.lat,zoom:zoom}));}catch(e){console.warn('Viewport bounds bridge unavailable: '+e);}
+ try{const nw=geoPoint(left,top,zoom),se=geoPoint(left+sz.w,top+sz.h,zoom),payload=JSON.stringify({west:nw.lon,north:nw.lat,east:se.lon,south:se.lat,zoom:zoom});if(payload!==lastViewportPayload&&window.HaulwayViewportBridge&&window.HaulwayViewportBridge.onViewportBounds){lastViewportPayload=payload;window.HaulwayViewportBridge.onViewportBounds(payload);}}catch(e){console.warn('Viewport bounds bridge unavailable: '+e);}
  renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
  const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
  const x0=Math.floor(left/256)-1,y0=Math.floor(top/256)-1,x1=Math.floor((left+sz.w)/256)+1,y1=Math.floor((top+sz.h)/256)+1,max=Math.pow(2,zoom);
