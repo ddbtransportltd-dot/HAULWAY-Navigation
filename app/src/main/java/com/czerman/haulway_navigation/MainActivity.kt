@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Looper
 import android.content.Context
 import android.content.pm.PackageManager
+import android.view.View
 import android.graphics.BitmapFactory
 import android.Manifest
 import android.hardware.Sensor
