@@ -43,8 +43,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 23
-        versionName = "2.1.9-vision19-route-intelligence"
+        versionCode = 24
+        versionName = "2.2.0-vision20-address-preview-map-cleanup"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
