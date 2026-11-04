@@ -1321,7 +1321,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             Box(Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterStart) {
             Surface(
                 modifier = Modifier.fillMaxHeight().fillMaxWidth(0.46f),
-                color = Color(0xF218232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp,
+                color = Color(0x8C18232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp,
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1330,7 +1330,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text("SEARCH MAP", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text("Find an address, town or postcode", color = Color(0xFFB7C4CD), fontSize = 12.sp)
+                    Text("Search a street or postcode, then choose the street and an available house number.", color = Color(0xFFB7C4CD), fontSize = 12.sp)
                     OutlinedTextField(
                         value = mapSearchText, onValueChange = { mapSearchText = it; mapSearchError = null },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
@@ -1368,16 +1368,30 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             mapSearchResults.forEach { place ->
                                 Surface(Modifier.fillMaxWidth().clickable {
-                                    // Choosing an autocomplete result opens the location card first.
-                                    // Route calculation is deliberately reserved for the GO action.
-                                    roadPreviewPlace = place
-                                    mapSearchResults = emptyList()
-                                    showMapSearch = false
+                                    if (place.resultType == "street") {
+                                        mapSearchLoading = true
+                                        mapSearchError = null
+                                        mapSearchScope.launch {
+                                            try {
+                                                val houses = searchMapStreetNumbers(place)
+                                                mapSearchText = place.name
+                                                mapSearchResults = houses
+                                                mapSearchError = if (houses.isEmpty()) "No mapped house numbers for this street. Try entering the house number or postcode." else null
+                                            } catch (e: Exception) {
+                                                mapSearchError = e.localizedMessage ?: "Could not load house numbers"
+                                            } finally { mapSearchLoading = false }
+                                        }
+                                    } else {
+                                        // Selecting a house/address opens the location card; GO remains the only route-start action.
+                                        roadPreviewPlace = place
+                                        mapSearchResults = emptyList()
+                                        showMapSearch = false
+                                    }
                                 }, color = Color(0xFF26333D), shape = RoundedCornerShape(7.dp)) {
                                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Default.LocationOn, null, tint = Color(0xFF70C9FF), modifier = Modifier.size(19.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                        Column(Modifier.weight(1f)) {\n                                            Text(place.name, color = White, fontSize = 12.sp)\n                                            if (place.resultType == "street") Text("SELECT STREET · THEN CHOOSE HOUSE NUMBER", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold)\n                                        }
                                         Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF70C9FF))
                                     }
                                 }
@@ -1400,7 +1414,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             Box(Modifier.fillMaxSize().background(Color(0x55000000)), contentAlignment = Alignment.Center) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(0.56f).widthIn(min = 310.dp, max = 570.dp),
-                    color = Color(0xF20E1926), shape = RoundedCornerShape(22.dp),
+                    color = Color(0x8C0E1926), shape = RoundedCornerShape(22.dp),
                     border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF168FE8)),
                     shadowElevation = 18.dp
                 ) {
@@ -1495,7 +1509,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     if (showStreetView && roadPreviewPlace != null) {
         val place = roadPreviewPlace!!
         Dialog(onDismissRequest = { showStreetView = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f), color = Color(0xFF101820),
+            Surface(Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f), color = Color(0x8C101820),
                 shape = RoundedCornerShape(16.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
                 Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2376,7 +2390,7 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
         ) {
             Surface(
                 modifier = Modifier.fillMaxWidth(0.82f),
-                color = Color(0xFF18232C),
+                color = Color(0x8C18232C),
                 shape = RoundedCornerShape(14.dp),
                 tonalElevation = 12.dp
             ) {
@@ -2467,7 +2481,7 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
         Dialog(onDismissRequest = { roadPreviewPlace = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(
                 modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.88f),
-                color = Color(0xFF101820), shape = RoundedCornerShape(14.dp),
+                color = Color(0x8C101820), shape = RoundedCornerShape(14.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
             ) {
                 Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2505,7 +2519,7 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
     }
 }
 
-private data class MapSearchResult(val name: String, val latitude: Double, val longitude: Double)
+private data class MapSearchResult(val name: String, val latitude: Double, val longitude: Double, val resultType: String = "address")
 
 private suspend fun searchMapPlaces(
     query: String,
@@ -2579,7 +2593,7 @@ private suspend fun searchMapPlaces(
                 props.optString("postcode"), props.optString("country")
             ).filter { it.isNotBlank() }.distinct()
             val label = parts.joinToString(", ")
-            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) results.add(MapSearchResult(label, lat, lon))
+            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) {\n                val resultType = if (props.optString("type").equals("street", true)) "street" else if (props.optString("type").equals("house", true) || props.optString("housenumber").isNotBlank()) "house" else "address"\n                results.add(MapSearchResult(label, lat, lon, resultType))\n            }
         }
     } finally {
         connection.disconnect()
@@ -2589,6 +2603,40 @@ private suspend fun searchMapPlaces(
         .sortedWith(compareByDescending<MapSearchResult> { Regex("^\\d+\\s+.+").containsMatchIn(it.name) }
             .thenBy { it.name.lowercase(Locale.UK) })
         .take(30)
+}
+
+private suspend fun searchMapStreetNumbers(street: MapSearchResult): List<MapSearchResult> = withContext(Dispatchers.IO) {
+    val streetName = street.name.substringBefore(",").trim()
+    val escapedStreet = streetName.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
+    val query = "[out:json][timeout:15];(node(around:1800,${street.latitude},${street.longitude})[\"addr:street\"~\"^$escapedStreet$\",i][\"addr:housenumber\"];way(around:1800,${street.latitude},${street.longitude})[\"addr:street\"~\"^$escapedStreet$\",i][\"addr:housenumber\"];);out center tags 80;"
+    val endpoint = "https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8")
+    val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0 (street number lookup)")
+        connectTimeout = 12000
+        readTimeout = 18000
+    }
+    try {
+        val elements = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("elements") ?: org.json.JSONArray()
+        val found = mutableListOf<MapSearchResult>()
+        for (i in 0 until elements.length()) {
+            val element = elements.optJSONObject(i) ?: continue
+            val tags = element.optJSONObject("tags") ?: continue
+            val number = tags.optString("addr:housenumber").trim()
+            val road = tags.optString("addr:street").ifBlank { streetName }
+            if (number.isBlank()) continue
+            val center = element.optJSONObject("center")
+            val lat = if (element.has("lat")) element.optDouble("lat", Double.NaN) else center?.optDouble("lat", Double.NaN) ?: Double.NaN
+            val lon = if (element.has("lon")) element.optDouble("lon", Double.NaN) else center?.optDouble("lon", Double.NaN) ?: Double.NaN
+            if (!lat.isFinite() || !lon.isFinite()) continue
+            val locality = listOf(tags.optString("addr:city"), tags.optString("addr:town"), tags.optString("addr:suburb"), tags.optString("addr:postcode"))
+                .firstOrNull { it.isNotBlank() }.orEmpty()
+            val label = listOf("$number $road", locality, tags.optString("addr:postcode"), tags.optString("addr:country"))
+                .filter { it.isNotBlank() }.distinct().joinToString(", ")
+            found.add(MapSearchResult(label, lat, lon, "house"))
+        }
+        found.distinctBy { it.name.lowercase(Locale.UK) }.sortedBy { it.name.lowercase(Locale.UK) }.take(80)
+    } finally { connection.disconnect() }
 }
 
 private suspend fun searchRoutePlaces(query: String): List<String> = withContext(Dispatchers.IO) {
