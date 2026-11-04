@@ -807,16 +807,28 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     activeManeuverIndex = index
                     val remainingMetres = distanceTo(maneuvers[index]).coerceAtLeast(0.0)
                     distanceToManeuver = remainingMetres
-                    // Announce each approach stage once per maneuver. The spoken distance is
-                    // deliberately approximate; the visual distance remains continuously updated.
-                    // One clear spoken approach cue at 500 m; avoid stacked NOW/300 m prompts.
-                    val stage = if (remainingMetres <= 500.0) "500" else ""
+                    // Roundabouts receive staged prompts. The exit wording comes directly
+                    // from the routing engine's instruction; HAULWAY must never invent an exit.
+                    val target = maneuvers[index]
+                    val action = target.label.lowercase(Locale.UK)
+                    val isRoundabout = action.contains("roundabout")
+                    val stage = if (isRoundabout) {
+                        when {
+                            remainingMetres <= 40.0 -> "NOW"
+                            remainingMetres <= 150.0 -> "150"
+                            remainingMetres <= 500.0 -> "500"
+                            else -> ""
+                        }
+                    } else if (remainingMetres <= 500.0) "500" else ""
                     val speechKey = "$index:$stage"
                     if (soundOn && speechReady && stage.isNotEmpty() && speechKey != lastSpokenStage) {
-                        val target = maneuvers[index]
-                        val action = target.label.lowercase(Locale.UK)
                         val road = target.roadName.takeIf { it.isNotBlank() }?.let { " onto $it" } ?: ""
-                        val message = "In 500 metres, $action$road"
+                        val message = when (stage) {
+                            "500" -> "In 500 metres, $action$road"
+                            "150" -> "Approaching the roundabout. $action$road"
+                            "NOW" -> "At the roundabout, $action$road"
+                            else -> action
+                        }
                         speechEngine?.speak(message, TextToSpeech.QUEUE_FLUSH, null, speechKey)
                         lastSpokenStage = speechKey
                     }
