@@ -43,8 +43,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 19
-        versionName = "2.1.5-vision15-gps-arrow"
+        versionCode = 20
+        versionName = "2.1.6-vision16-driving-guidance"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
