@@ -1374,6 +1374,7 @@ private fun updateHaulwayNativeMapOverlays(
 @Composable
 private fun HaulwayNativeMapCanvas(
     routeJson: String?,
+    mapStyleRequest: Int = 0,
     latitude: Double? = null,
     longitude: Double? = null,
     bearing: Float? = null,
@@ -1390,7 +1391,13 @@ private fun HaulwayNativeMapCanvas(
     var globeMode by remember { mutableStateOf(false) }
     var styleReady by remember { mutableStateOf(false) }
     var styleError by remember { mutableStateOf<String?>(null) }
+    var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
     var cachedStyleJson by remember { mutableStateOf<String?>(null) }
+    val activeStyleUrl = if (mapStyleRequest % 2 == 0) {
+        HAULWAY_NATIVE_MAP_STYLE_URL
+    } else {
+        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+    }
 
     val mapView = remember(context) {
         MapLibre.getInstance(context)
@@ -1426,13 +1433,16 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode) {
+    LaunchedEffect(mapLibreMap, globeMode, activeStyleUrl) {
         val map = mapLibreMap ?: return@LaunchedEffect
         styleReady = false
         styleError = null
         try {
-            val rawStyle = cachedStyleJson ?: withContext(Dispatchers.IO) {
-                val connection = URL(HAULWAY_NATIVE_MAP_STYLE_URL).openConnection() as java.net.HttpURLConnection
+            val rawStyle = if (cachedStyleUrl == activeStyleUrl && cachedStyleJson != null) {
+                cachedStyleJson!!
+            } else {
+                withContext(Dispatchers.IO) {
+                val connection = URL(activeStyleUrl).openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 12000
                 connection.readTimeout = 18000
                 try {
@@ -1440,7 +1450,11 @@ private fun HaulwayNativeMapCanvas(
                 } finally {
                     connection.disconnect()
                 }
-            }.also { cachedStyleJson = it }
+                }.also {
+                    cachedStyleUrl = activeStyleUrl
+                    cachedStyleJson = it
+                }
+            }
 
             val styleJson = JSONObject(rawStyle)
                 .put("projection", JSONObject().put("type", if (globeMode) "globe" else "mercator"))
@@ -1464,7 +1478,7 @@ private fun HaulwayNativeMapCanvas(
             styleError = error.localizedMessage ?: "Could not load the native map style."
             android.util.Log.e("HAULWAY_MAPLIBRE", "Native map style load failed", error)
             if (!globeMode) {
-                map.setStyle(HAULWAY_NATIVE_MAP_STYLE_URL) {
+                map.setStyle(activeStyleUrl) {
                     styleReady = true
                     updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, searchLocation)
                 }
@@ -1561,6 +1575,7 @@ private fun RealNavigationMap(
 ) {
     HaulwayNativeMapCanvas(
         routeJson = RoutePlanStore.coordinatesJson,
+        mapStyleRequest = mapStyleRequest,
         latitude = latitude,
         longitude = longitude,
         bearing = bearing,
@@ -1747,6 +1762,7 @@ private fun HaulwayHomeScreen(onNavigate: (String) -> Unit) {
 private fun RoutePlannerMapView(routeJson: String?) {
     HaulwayNativeMapCanvas(
         routeJson = routeJson,
+        mapStyleRequest = 0,
         zoom = 0,
         followEnabled = false,
         tilt3D = false,

@@ -43,8 +43,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 17
-        versionName = "2.1.3-vision13-route-overlay"
+        versionCode = 18
+        versionName = "2.1.4-vision14-native-map-globe"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
