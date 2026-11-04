@@ -87,6 +87,8 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
@@ -666,7 +668,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var selectedMapSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
-    var headingUp by remember { mutableStateOf(true) }
     var followEnabled by remember { mutableStateOf(true) }
     var tilt3D by remember { mutableStateOf(true) }
     var remainingDistanceMetres by remember { mutableStateOf<Double?>(null) }
@@ -942,12 +943,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, followEnabled, tilt3D, selectedMapSearchLocation)
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
                     // Keep SEARCH below the manoeuvre banner so it is never hidden behind it.
-                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 68.dp).size(44.dp).clickable {
+                    Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 10.dp).size(44.dp).clickable {
                         showMapSearch = true
                         mapSearchError = null
                         selectedMapSearchLocation = null
@@ -1010,9 +1011,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 Column(Modifier.align(Alignment.CenterEnd).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Surface(Modifier.size(38.dp).clickable { mapStyleRequest++ }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Layers, "Switch road / satellite map", tint = White) }
-                    }
-                    Surface(Modifier.size(38.dp).clickable { headingUp = !headingUp }, shape = RoundedCornerShape(8.dp), color = if (headingUp) Color(0xFF087CCB) else panel) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Explore, if (headingUp) "Vehicle marker follows compass heading; map stays north-up" else "Vehicle marker points north; map stays north-up", tint = White) }
                     }
                     Surface(Modifier.size(38.dp).clickable {
                         followEnabled = true
@@ -1300,6 +1298,7 @@ private fun updateHaulwayNativeMapOverlays(
     routeJson: String?,
     latitude: Double?,
     longitude: Double?,
+    bearing: Float?,
     searchLocation: Pair<Double, Double>?
 ) {
     if (!routeJson.isNullOrBlank()) {
@@ -1336,18 +1335,40 @@ private fun updateHaulwayNativeMapOverlays(
     }
 
     if (latitude != null && longitude != null) {
-        val point = Feature.fromGeometry(Point.fromLngLat(longitude, latitude))
+        val point = Feature.fromGeometry(Point.fromLngLat(longitude, latitude)).apply {
+            addNumberProperty("bearing", (bearing ?: 0f).toDouble())
+        }
         val source = style.getSourceAs<GeoJsonSource>("haulway-vehicle-source")
         if (source != null) {
             source.setGeoJson(point)
         } else {
+            // GPS marker is geographically anchored and drawn above the route line.
+            val bitmap = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val arrow = android.graphics.Path().apply {
+                moveTo(48f, 5f); lineTo(79f, 84f); lineTo(48f, 68f); lineTo(17f, 84f); close()
+            }
+            val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.rgb(0, 145, 235)
+                style = android.graphics.Paint.Style.FILL
+            }
+            canvas.drawPath(arrow, fill)
+            val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 5f
+            }
+            canvas.drawPath(arrow, outline)
+            style.addImage("haulway-vehicle-arrow", bitmap)
             style.addSource(GeoJsonSource("haulway-vehicle-source", point))
             style.addLayer(
-                CircleLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
-                    PropertyFactory.circleRadius(9f),
-                    PropertyFactory.circleColor("#168FE8"),
-                    PropertyFactory.circleStrokeColor("#FFFFFF"),
-                    PropertyFactory.circleStrokeWidth(3f)
+                SymbolLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
+                    PropertyFactory.iconImage("haulway-vehicle-arrow"),
+                    PropertyFactory.iconSize(0.72f),
+                    PropertyFactory.iconRotate(Expression.get("bearing")),
+                    PropertyFactory.iconRotationAlignment("map"),
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.iconIgnorePlacement(true)
                 )
             )
         }
@@ -1468,6 +1489,7 @@ private fun HaulwayNativeMapCanvas(
                     routeJson,
                     latitude,
                     longitude,
+                    bearing,
                     searchLocation
                 )
                 android.util.Log.i(
@@ -1481,17 +1503,17 @@ private fun HaulwayNativeMapCanvas(
             if (!globeMode) {
                 map.setStyle(activeStyleUrl) {
                     styleReady = true
-                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, searchLocation)
+                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, bearing, searchLocation)
                 }
             }
         }
     }
 
-    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, searchLocation) {
+    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, bearing, searchLocation) {
         val map = mapLibreMap ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.getStyle { style ->
-            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, searchLocation)
+            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, bearing, searchLocation)
         }
     }
 
@@ -1569,7 +1591,6 @@ private fun RealNavigationMap(
     accuracy: Float?,
     followRequest: Int,
     mapStyleRequest: Int,
-    headingUp: Boolean,
     followEnabled: Boolean,
     tilt3D: Boolean,
     searchLocation: Pair<Double, Double>?
