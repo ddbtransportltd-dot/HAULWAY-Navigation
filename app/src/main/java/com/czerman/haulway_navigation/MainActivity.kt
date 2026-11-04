@@ -1693,14 +1693,18 @@ private fun HaulwayNativeMapCanvas(
                 if (type == "symbol" && (id.contains("bus-stop") || id.contains("bus_stop") ||
                     id.contains("busstop") || id.contains("bus-station") || id.contains("bus_station"))) continue
                 if (type == "symbol" && (sourceLayer.contains("poi") || id.contains("poi") || id.contains("transit"))) {
-                    val oldFilter = layer.optJSONArray("filter") ?: org.json.JSONArray(listOf("all"))
-                    val excluded = org.json.JSONArray().put("any")
-                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "bus_stop"))
-                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "bus_station"))
-                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("class"), "bus_stop"))
-                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("class"), "bus_station"))
-                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "public_transport"))
-                    layer.put("filter", org.json.JSONArray().put("all").put(oldFilter).put(org.json.JSONArray().put("!").put(excluded)))
+                    val oldFilter = layer.optJSONArray("filter") ?: org.json.JSONArray().apply { put(0, "all") }
+                    fun jsonArrayOf(vararg values: Any): org.json.JSONArray =
+                        org.json.JSONArray().apply { values.forEachIndexed { index, value -> put(index, value) } }
+                    val excluded = jsonArrayOf(
+                        "any",
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "bus_stop"),
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "bus_station"),
+                        jsonArrayOf("==", jsonArrayOf("get", "class"), "bus_stop"),
+                        jsonArrayOf("==", jsonArrayOf("get", "class"), "bus_station"),
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "public_transport")
+                    )
+                    layer.put("filter", jsonArrayOf("all", oldFilter, jsonArrayOf("!", excluded)))
                 }
                 cleanedLayers.put(layer)
             }
@@ -2047,6 +2051,7 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
     var selectedAddress by remember { mutableStateOf(false) }
     var searchingAddresses by remember { mutableStateOf(false) }
     var addressSearchError by remember { mutableStateOf<String?>(null) }
+    var roadPreviewPlace by remember { mutableStateOf<MapSearchResult?>(null) }
     var dragRemainder by remember { mutableFloatStateOf(0f) }
     val dragThreshold = with(androidx.compose.ui.platform.LocalDensity.current) { 62.dp.toPx() }
     var showBreakMenu by remember { mutableStateOf(false) }
