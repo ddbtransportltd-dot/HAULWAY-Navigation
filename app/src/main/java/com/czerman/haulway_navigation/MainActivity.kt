@@ -2354,23 +2354,65 @@ private suspend fun searchMapPlaces(
     biasLatitude: Double? = null,
     biasLongitude: Double? = null
 ): List<MapSearchResult> = withContext(Dispatchers.IO) {
-    // Photon is designed for type-ahead search and returns street/house/postcode components.
+    val normalized = query.trim().uppercase(Locale.UK).replace(Regex("\\s+"), " ")
+    val looksLikeUkPostcode = Regex("^[A-Z]{1,2}[0-9R][0-9A-Z]?\\s*[0-9][A-Z]{2}$", RegexOption.IGNORE_CASE).matches(normalized)
+    val results = mutableListOf<MapSearchResult>()
+
+    // Exact postcode address objects are more useful than a single postcode centroid.
+    if (looksLikeUkPostcode) {
+        val escapedPostcode = normalized.replace(Regex("\\s+"), " ").replace("\\", "\\\\").replace("\"", "\\\"")
+        val overpassQuery = "[out:json][timeout:10];(node[\"addr:postcode\"~\"^$escapedPostcode$\",i];way[\"addr:postcode\"~\"^$escapedPostcode$\",i];);out center tags;"
+        val endpoint = "https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(overpassQuery, "UTF-8")
+        runCatching {
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0 (postcode address suggestions)")
+                connectTimeout = 7000
+                readTimeout = 11000
+            }
+            try {
+                val elements = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("elements") ?: org.json.JSONArray()
+                for (i in 0 until elements.length()) {
+                    val element = elements.optJSONObject(i) ?: continue
+                    val tags = element.optJSONObject("tags") ?: continue
+                    val number = tags.optString("addr:housenumber")
+                    val street = tags.optString("addr:street")
+                    if (number.isBlank() || street.isBlank()) continue
+                    val center = element.optJSONObject("center")
+                    val lat = if (element.has("lat")) element.optDouble("lat", Double.NaN) else center?.optDouble("lat", Double.NaN) ?: Double.NaN
+                    val lon = if (element.has("lon")) element.optDouble("lon", Double.NaN) else center?.optDouble("lon", Double.NaN) ?: Double.NaN
+                    if (!lat.isFinite() || !lon.isFinite()) continue
+                    val town = listOf(tags.optString("addr:city"), tags.optString("addr:town"), tags.optString("addr:suburb")).firstOrNull { it.isNotBlank() }.orEmpty()
+                    val label = listOf("$number $street", town, tags.optString("addr:postcode").ifBlank { normalized }, "United Kingdom")
+                        .filter { it.isNotBlank() }.distinct().joinToString(", ")
+                    results.add(MapSearchResult(label, lat, lon))
+                }
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    // Photon supplies general type-ahead results. Do not bias a postcode search toward the truck's current location.
     val encoded = URLEncoder.encode(query, "UTF-8")
-    val bias = if (biasLatitude != null && biasLongitude != null)
+    val bias = if (!looksLikeUkPostcode && biasLatitude != null && biasLongitude != null)
         "&lat=$biasLatitude&lon=$biasLongitude&zoom=14&location_bias_scale=0.2" else ""
-    val connection = (URL("https://photon.komoot.io/api/?q=$encoded&limit=20&lang=en$bias").openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"; setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0 (Android map autocomplete)"); connectTimeout = 12000; readTimeout = 15000
+    val connection = (URL("https://photon.komoot.io/api/?q=$encoded&limit=30&lang=en$bias").openConnection() as HttpURLConnection).apply {
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0 (Android map autocomplete)")
+        connectTimeout = 12000
+        readTimeout = 15000
     }
     try {
-        val root = org.json.JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
         val features = root.optJSONArray("features") ?: org.json.JSONArray()
-        val results = (0 until features.length()).mapNotNull { index ->
-            val feature = features.getJSONObject(index)
-            val coordinates = feature.optJSONObject("geometry")?.optJSONArray("coordinates") ?: return@mapNotNull null
-            if (coordinates.length() < 2) return@mapNotNull null
+        for (index in 0 until features.length()) {
+            val feature = features.optJSONObject(index) ?: continue
+            val coordinates = feature.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
+            if (coordinates.length() < 2) continue
             val lon = coordinates.optDouble(0, Double.NaN)
             val lat = coordinates.optDouble(1, Double.NaN)
-            val props = feature.optJSONObject("properties") ?: org.json.JSONObject()
+            val props = feature.optJSONObject("properties") ?: JSONObject()
             val houseAndStreet = listOf(props.optString("housenumber"), props.optString("street"))
                 .filter { it.isNotBlank() }.joinToString(" ")
             val parts = listOf(
@@ -2379,10 +2421,16 @@ private suspend fun searchMapPlaces(
                 props.optString("postcode"), props.optString("country")
             ).filter { it.isNotBlank() }.distinct()
             val label = parts.joinToString(", ")
-            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) MapSearchResult(label, lat, lon) else null
+            if (lat.isFinite() && lon.isFinite() && label.isNotBlank()) results.add(MapSearchResult(label, lat, lon))
         }
-        results.distinctBy { "${it.name.lowercase(Locale.UK)}|${it.latitude}|${it.longitude}" }
-    } finally { connection.disconnect() }
+    } finally {
+        connection.disconnect()
+    }
+
+    results.distinctBy { it.name.lowercase(Locale.UK) + "|" + it.latitude + "|" + it.longitude }
+        .sortedWith(compareByDescending<MapSearchResult> { Regex("^\\d+\\s+.+").containsMatchIn(it.name) }
+            .thenBy { it.name.lowercase(Locale.UK) })
+        .take(30)
 }
 
 private suspend fun searchRoutePlaces(query: String): List<String> = withContext(Dispatchers.IO) {
