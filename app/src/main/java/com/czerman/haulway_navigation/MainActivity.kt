@@ -1417,11 +1417,7 @@ function render(){
  renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
  const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
  const x0=Math.floor(left/256)-1,y0=Math.floor(top/256)-1,x1=Math.floor((left+sz.w)/256)+1,y1=Math.floor((top+sz.h)/256)+1,max=Math.pow(2,zoom);
- function finish(){if(generation!==renderGeneration)return;
-   // Reveal the map after the first real tile arrives instead of waiting for every
-   // surrounding tile. Remaining tiles continue loading progressively in the background.
-   if(loadedNow>0){status.style.display='none';}
-   if(pending>0)return;
+ function finish(){if(generation!==renderGeneration||pending>0)return;
    if(failedNow>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();return;}
    // Retain only visible tiles after the replacement set is ready. This avoids blank frames.
    for(const [key,node] of tileCache){if(!wanted.has(key)){node.remove();tileCache.delete(key);}}
