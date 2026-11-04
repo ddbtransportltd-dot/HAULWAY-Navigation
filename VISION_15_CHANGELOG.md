@@ -30,3 +30,13 @@ Build APK nie został wykonany w tym środowisku; należy sprawdzić kompilację
 - CARTO raster requests use standard 1x PNG tiles instead of 2x images to reduce transfer and decode cost.
 - Build version: 2.0.7 (versionCode 11).
 - Android build and on-device behavior still require verification in Android Studio / tablet.
+
+
+## VISION 15 — Native GPS marker and map controls
+- Replaced the blue GPS dot with a directional arrow symbol anchored to the live GPS coordinate in the MapLibre map.
+- The vehicle arrow is rendered above the route line and rotates using the live bearing property.
+- Removed the ineffective compass/heading toggle and its state from the driving map UI.
+- Moved the map search button to the upper-left corner.
+- Kept the separate recenter/follow control and the existing globe/map switch.
+- North-up camera orientation remains the default; camera bearing is zero.
+- On-device testing is still required for GPS arrow layering, bearing, manual map panning, and follow behaviour.
