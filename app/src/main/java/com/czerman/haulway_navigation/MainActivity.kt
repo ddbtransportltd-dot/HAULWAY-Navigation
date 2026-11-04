@@ -1681,7 +1681,31 @@ private fun HaulwayNativeMapCanvas(
                 }
             }
 
-            val styleJson = JSONObject(rawStyle)
+            val parsedStyle = JSONObject(rawStyle)
+            val layers = parsedStyle.optJSONArray("layers") ?: org.json.JSONArray()
+            val cleanedLayers = org.json.JSONArray()
+            for (i in 0 until layers.length()) {
+                val layer = layers.optJSONObject(i) ?: continue
+                val id = layer.optString("id").lowercase(Locale.UK)
+                val sourceLayer = layer.optString("source-layer").lowercase(Locale.UK)
+                val type = layer.optString("type")
+                // Remove dedicated bus-stop symbols and filter bus-stop features from shared POI layers.
+                if (type == "symbol" && (id.contains("bus-stop") || id.contains("bus_stop") ||
+                    id.contains("busstop") || id.contains("bus-station") || id.contains("bus_station"))) continue
+                if (type == "symbol" && (sourceLayer.contains("poi") || id.contains("poi") || id.contains("transit"))) {
+                    val oldFilter = layer.optJSONArray("filter") ?: org.json.JSONArray(listOf("all"))
+                    val excluded = org.json.JSONArray().put("any")
+                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "bus_stop"))
+                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "bus_station"))
+                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("class"), "bus_stop"))
+                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("class"), "bus_station"))
+                        .put(org.json.JSONArray().put("==").put(org.json.JSONArray().put("get").put("subclass"), "public_transport"))
+                    layer.put("filter", org.json.JSONArray().put("all").put(oldFilter).put(org.json.JSONArray().put("!").put(excluded)))
+                }
+                cleanedLayers.put(layer)
+            }
+            parsedStyle.put("layers", cleanedLayers)
+            val styleJson = parsedStyle
                 .put("projection", JSONObject().put("type", if (globeMode) "globe" else "mercator"))
                 .toString()
 
