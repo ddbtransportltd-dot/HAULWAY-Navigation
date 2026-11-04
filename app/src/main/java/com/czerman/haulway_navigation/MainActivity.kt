@@ -24,6 +24,7 @@ import java.util.Locale
 import java.util.Date
 import java.text.SimpleDateFormat
 import android.webkit.WebChromeClient
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -1416,6 +1417,7 @@ const mapResizeObserver=new ResizeObserver(()=>window.haulwayResize());
 mapResizeObserver.observe(root);
 function render(){
  const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
+ try{const nw=geoPoint(left,top,zoom),se=geoPoint(left+sz.w,top+sz.h,zoom);if(window.HaulwayViewportBridge&&window.HaulwayViewportBridge.onViewportBounds)window.HaulwayViewportBridge.onViewportBounds(JSON.stringify({west:nw.lon,north:nw.lat,east:se.lon,south:se.lat,zoom:zoom}));}catch(e){console.warn('Viewport bounds bridge unavailable: '+e);}
  renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
  const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
  const x0=Math.floor(left/256)-1,y0=Math.floor(top/256)-1,x1=Math.floor((left+sz.w)/256)+1,y1=Math.floor((top+sz.h)/256)+1,max=Math.pow(2,zoom);
@@ -1715,7 +1717,7 @@ private fun HaulwayHomeScreen(onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTrafficIncident> = emptyList()) {
+private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTrafficIncident> = emptyList(), onViewportBounds: (String) -> Unit = {}) {
     var mapView by remember { mutableStateOf<WebView?>(null) }
     var pageReady by remember { mutableStateOf(false) }
     var lastRoute by remember { mutableStateOf<String?>(null) }
@@ -1743,6 +1745,12 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                 setBackgroundColor(android.graphics.Color.rgb(23, 35, 43))
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun onViewportBounds(json: String) {
+                        android.os.Handler(Looper.getMainLooper()).post { onViewportBounds(json) }
+                    }
+                }, "HaulwayViewportBridge")
                 settings.loadsImagesAutomatically = true
                 settings.blockNetworkImage = false
                 settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
@@ -2391,7 +2399,7 @@ private data class HaulwayTrafficSnapshot(
     val trafficModelId: String?
 )
 
-private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String): HaulwayTrafficSnapshot =
+private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String, mapBoundsJson: String? = null): HaulwayTrafficSnapshot =
     withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.TOMTOM_TRAFFIC_API_KEY.trim()
         check(apiKey.isNotEmpty()) {
@@ -2417,7 +2425,21 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
             } else null
         } else null
 
-        val bbox = routeBounds ?: run {
+        val mapBounds = if (scope == "MAP") {
+            check(!mapBoundsJson.isNullOrBlank()) { "Map viewport is not ready yet. Wait for the map to finish loading, then refresh traffic." }
+            val bounds = JSONObject(mapBoundsJson)
+            val west = bounds.getDouble("west")
+            val north = bounds.getDouble("north")
+            val east = bounds.getDouble("east")
+            val south = bounds.getDouble("south")
+            check(west.isFinite() && east.isFinite() && north.isFinite() && south.isFinite() && north > south) { "The visible map area is invalid. Move or zoom the map and try again." }
+            val lonSpan = if (east >= west) east - west else (180.0 - west) + (east + 180.0)
+            val latSpan = north - south
+            val approxAreaKm2 = latSpan * 111.0 * lonSpan * 111.0 * kotlin.math.cos(Math.toRadians((north + south) / 2.0)).coerceAtLeast(0.1)
+            check(approxAreaKm2 <= 10000.0) { "The visible map area is too large for a single live traffic request. Zoom in and refresh again." }
+            listOf(west, south, east, north)
+        } else null
+        val bbox = mapBounds ?: routeBounds ?: run {
             val location = resolveHaulwayCurrentLocation(context)
             val lon = location.first
             val lat = location.second
@@ -2530,6 +2552,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     var trafficSnapshot by remember { mutableStateOf<HaulwayTrafficSnapshot?>(null) }
     var trafficLoading by remember { mutableStateOf(false) }
     var trafficError by remember { mutableStateOf<String?>(null) }
+    var mapViewportBounds by remember { mutableStateOf<String?>(null) }
     val trafficScope = rememberCoroutineScope()
     val groups = listOf("ALL", "TRAFFIC", "INCIDENTS", "ROAD STATUS", "WEATHER", "HGV RESTRICTIONS", "CHARGES & CONTROL", "SAFETY", "TRAVEL")
     val visibleLayers = layers.mapIndexed { index, layer -> index to layer }.filter { (_, layer) ->
@@ -2602,7 +2625,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                                 trafficError = null
                                 trafficScope.launch {
                                     try {
-                                        trafficSnapshot = fetchHaulwayTrafficIncidents(context, selectedScope)
+                                        trafficSnapshot = fetchHaulwayTrafficIncidents(context, selectedScope, mapViewportBounds)
                                     } catch (error: Exception) {
                                         trafficError = error.message ?: "Traffic feed could not be loaded."
                                     } finally {
@@ -2718,7 +2741,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
             Text("FILTERS ARE SAVED ON THIS DEVICE", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
         Box(Modifier.weight(0.66f).fillMaxHeight().padding(start = 3.dp)) {
-            RoutePlannerMapView(routeJson = null, incidents = displayedIncidents)
+            RoutePlannerMapView(routeJson = null, incidents = displayedIncidents, onViewportBounds = { mapViewportBounds = it })
             Column(Modifier.align(Alignment.TopStart).padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(color = Color(0xE619252F), shape = RoundedCornerShape(7.dp)) {
                     Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
