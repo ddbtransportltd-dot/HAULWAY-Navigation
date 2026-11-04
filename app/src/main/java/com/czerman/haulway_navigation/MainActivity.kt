@@ -876,7 +876,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, liveSpeedMph, distanceToManeuver, RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.label, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
@@ -1232,7 +1232,7 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
 }
 
 @Composable
-private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, followEnabled: Boolean, tilt3D: Boolean, searchLocation: Pair<Double, Double>?) {
+private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, speedMph: Double?, maneuverDistanceMetres: Double?, maneuverLabel: String?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, followEnabled: Boolean, tilt3D: Boolean, searchLocation: Pair<Double, Double>?) {
     val context = LocalContext.current
     var pageReady by remember { mutableStateOf(false) }
     var lastSentRoute by remember { mutableStateOf<String?>(null) }
@@ -1337,7 +1337,7 @@ private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, 
                 if (latitude != null && longitude != null) {
                     val heading = bearing?.toDouble() ?: Double.NaN
                     val accuracyMetres = accuracy?.toDouble() ?: 18.0
-                    webView.evaluateJavascript("window.haulwaySetVehicleLocation && window.haulwaySetVehicleLocation($latitude,$longitude,$heading,$accuracyMetres)", null)
+                    webView.evaluateJavascript("window.haulwaySetVehicleLocation && window.haulwaySetVehicleLocation($latitude,$longitude,$heading,$accuracyMetres,${speedMph ?: "null"},${maneuverDistanceMetres ?: "null"},${JSONObject.quote(maneuverLabel.orEmpty())})", null)
                 }
                 if (followRequest > 0 && lastSentFollowRequest != followRequest) {
                     webView.evaluateJavascript("window.haulwayFollowRequest && window.haulwayFollowRequest($followRequest)", null)
@@ -1475,8 +1475,23 @@ function animateVehicleFrame(now){
  if(progress<1){vehicleAnimationFrame=requestAnimationFrame(animateVehicleFrame);}
  else{vehicleAnimationFrame=0;vehicleAnimFrom=targetVehicle;}
 }
-window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){
+let automaticCameraLastChange=0;
+function updateAutomaticCamera(speedMph,maneuverDistanceMetres,maneuverLabel){
+ if(!autoFollow||!Number.isFinite(speedMph))return;
+ const label=String(maneuverLabel||'').toLowerCase();
+ const isComplexManeuver=/(roundabout|junction|turn|exit|left|right|rondo)/.test(label);
+ let target=zoom;
+ if(Number.isFinite(maneuverDistanceMetres)&&maneuverDistanceMetres<=700&&isComplexManeuver)target=16;
+ else if(speedMph>=50&&(maneuverDistanceMetres==null||maneuverDistanceMetres>1200))target=13;
+ else if(speedMph>=35&&(maneuverDistanceMetres==null||maneuverDistanceMetres>900))target=14;
+ else if(speedMph<=30)target=15;
+ if(target!==zoom&&Date.now()-automaticCameraLastChange>8000){
+   zoom=clamp(target,3,19);automaticCameraLastChange=Date.now();scheduleRender();
+ }
+}
+window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy,speedMph,maneuverDistanceMetres,maneuverLabel){
  if(!Number.isFinite(lat)||!Number.isFinite(lon))return;
+ updateAutomaticCamera(speedMph,maneuverDistanceMetres,maneuverLabel);
  const next={lat,lon,bearing:Number.isFinite(bearing)?bearing:null,accuracy};
  if(!lastVehicle){
    lastVehicle=next;targetVehicle=next;vehicleAnimFrom=next;
