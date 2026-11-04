@@ -904,15 +904,23 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         } catch (_: Exception) { false }
         val listener = object : android.location.LocationListener {
             override fun onLocationChanged(location: android.location.Location) {
-                // When GNSS is available, never let a coarse network fix overwrite it.
-                // Network location is only a fallback when the device has no GPS provider.
-                if (gpsProviderEnabled && location.provider != android.location.LocationManager.GPS_PROVIDER) return
+                // Use a recent network/cached fix to centre the map quickly while GNSS starts.
+                // Once a real GPS fix arrives, it replaces the network estimate and network
+                // updates can no longer move the vehicle marker away from the GPS position.
+                if (gpsProviderEnabled &&
+                    location.provider != android.location.LocationManager.GPS_PROVIDER &&
+                    lastAcceptedLocation?.provider == android.location.LocationManager.GPS_PROVIDER
+                ) return
                 val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
-                if (ageMs > 6_000L) return
+                val maxAgeMs = if (lastAcceptedLocation == null) 120_000L else 6_000L
+                if (ageMs > maxAgeMs) return
                 val accuracy = if (location.hasAccuracy()) location.accuracy else 999f
-                if (accuracy > 50f) { liveAccuracy = accuracy; return }
+                val maxAccuracy = if (lastAcceptedLocation == null &&
+                    location.provider != android.location.LocationManager.GPS_PROVIDER
+                ) 100f else 50f
+                if (accuracy > maxAccuracy) { liveAccuracy = accuracy; return }
                 val previous = lastAcceptedLocation
-                if (previous != null) {
+                if (previous != null && previous.provider == location.provider) {
                     val elapsed = ((location.time - previous.time).coerceAtLeast(1L)) / 1000.0
                     val jumpSpeed = distanceMetres(previous.latitude, previous.longitude, location.latitude, location.longitude) / elapsed
                     if (elapsed < 8.0 && jumpSpeed > 55.0) return
@@ -1804,7 +1812,9 @@ private fun HaulwayNativeMapCanvas(
         if (latitude != null && longitude != null && globeMode) globeMode = false
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, activeStyleUrl) {
+    // Load the basemap once. The native globe projection automatically blends into
+    // Mercator as the camera zooms in, so changing projection must not reload the style.
+    LaunchedEffect(mapLibreMap, activeStyleUrl) {
         val map = mapLibreMap ?: return@LaunchedEffect
         styleReady = false
         styleError = null
@@ -1856,7 +1866,7 @@ private fun HaulwayNativeMapCanvas(
             }
             parsedStyle.put("layers", cleanedLayers)
             val styleJson = parsedStyle
-                .put("projection", JSONObject().put("type", if (globeMode) "globe" else "mercator"))
+                .put("projection", JSONObject().put("type", "globe"))
                 .toString()
 
             map.setStyle(Style.Builder().fromJson(styleJson)) { loadedStyle ->
@@ -1871,7 +1881,7 @@ private fun HaulwayNativeMapCanvas(
                 )
                 android.util.Log.i(
                     "HAULWAY_MAPLIBRE",
-                    "Native MapLibre style ready; projection=${if (globeMode) "globe" else "mercator"}"
+                    "Native MapLibre style ready; globe projection uses automatic Mercator transition at local zoom levels"
                 )
             }
         } catch (error: Exception) {
@@ -1923,7 +1933,8 @@ private fun HaulwayNativeMapCanvas(
                 .bearing(if (hasGps && followEnabled) (bearing ?: 0f).toDouble() else if (!followEnabled) currentCamera.bearing else 0.0)
                 .build()
         }
-        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 850)
+        // Keep the globe-to-live-position camera flight comfortably below five seconds.
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 1_400)
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF101B24))) {
