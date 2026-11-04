@@ -1,9 +1,11 @@
-# HAULWAY VISION 13
+# HAULWAY VISION 13 — Route signs and POI
 
-This source update adds an OpenStreetMap/Overpass overlay to the existing native tile map. Zoom to level 13 or closer to request mapped road-sign and POI data around the map center.
+This update adds an OpenStreetMap/Overpass overlay to the existing HAULWAY navigation map.
 
-The map uses recognizable STOP, GIVE WAY, traffic-signal, speed-limit, parking, fuel and POI symbols. Data coverage varies by location.
+- STOP, GIVE WAY, traffic-signal locations, mapped speed limits and speed cameras are shown only when associated with OSM road geometry matching the active route.
+- Mapped POIs are shown separately within 1.2 km of the active route: fuel, explicitly HGV-designated parking, other parking/rest areas, toilets, food, shops, repair, wash, weighbridges and accommodation.
+- Requests are made at zoom level 13 or closer and throttled to avoid repeatedly querying Overpass.
 
-**Not included:** live traffic status, live traffic-light phase, real-time accident/closure feeds, or verified live speed-camera alerts. These need separate data providers.
+Coverage depends on OSM data. Signal phase, live traffic, live camera alerts and live parking availability are not supplied by this overlay. See `VISION_13_CHANGELOG.md` for details.
 
-Build with the repository's GitHub Actions workflow (`HAULWAY Android Build`). Check that the workflow succeeds before installing the APK.
+Build using the repository's GitHub Actions workflow and test on the target tablet before installing the APK.
