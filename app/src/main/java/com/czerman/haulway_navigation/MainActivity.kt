@@ -2750,7 +2750,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                         Text(when (selectedScope) {
                             "ROUTE" -> "Scope: active route area"
                             "NEAR ME" -> "Scope: around current GPS position"
-                            else -> "Scope: GPS area (map viewport integration pending)"
+                            else -> if (mapViewportBounds != null) "Scope: visible map area" else "Scope: waiting for map viewport"
                         }, color = muted, fontSize = 8.sp)
                     }
                 }
