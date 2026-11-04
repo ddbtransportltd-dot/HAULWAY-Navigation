@@ -2375,6 +2375,9 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
         }
 
         val routeJson = RoutePlanStore.coordinatesJson
+        if (scope == "ROUTE") {
+            check(!routeJson.isNullOrBlank()) { "Calculate an active route before requesting traffic along the route." }
+        }
         val routeBounds = if (scope == "ROUTE" && !routeJson.isNullOrBlank()) {
             val coords = org.json.JSONArray(routeJson)
             val points = (0 until coords.length()).mapNotNull { index ->
