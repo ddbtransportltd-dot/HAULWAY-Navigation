@@ -278,12 +278,42 @@ private fun formatNavigationDistance(metres: Double): String = when {
 
 private data class RoadContext(val name: String, val speedLimit: String?)
 private data class RoadAlert(val label: String, val distanceMetres: Double)
-private suspend fun lookupNearbyRoadAlerts(latitude: Double, longitude: Double): List<RoadAlert> = withContext(Dispatchers.IO) {
-    val query = "[out:json][timeout:12];(node(around:650,$latitude,$longitude)[highway=traffic_signals];node(around:650,$latitude,$longitude)[highway=stop];node(around:650,$latitude,$longitude)[highway=give_way];node(around:650,$latitude,$longitude)[highway=speed_camera];node(around:650,$latitude,$longitude)[enforcement=maxspeed];node(around:650,$latitude,$longitude)[traffic_calming];way(around:650,$latitude,$longitude)[highway=construction];);out center tags;"
-    val encoded = URLEncoder.encode(query, "UTF-8")
+private suspend fun lookupNearbyRoadAlerts(latitude: Double, longitude: Double, routeJson: String?): List<RoadAlert> = withContext(Dispatchers.IO) {
+    // Only query mapped signs on the next 5 km of the active route, not all nearby map POIs.
+    val route = runCatching {
+        val input = org.json.JSONArray(routeJson ?: return@runCatching emptyList<Pair<Double, Double>>())
+        (0 until input.length()).mapNotNull { i ->
+            val p = input.optJSONArray(i) ?: return@mapNotNull null
+            if (p.length() < 2) null else {
+                val lon = p.optDouble(0, Double.NaN)
+                val lat = p.optDouble(1, Double.NaN)
+                if (lat.isFinite() && lon.isFinite()) lat to lon else null
+            }
+        }
+    }.getOrDefault(emptyList())
+    if (route.size < 2) return@withContext emptyList()
+    val nearestIndex = route.indices.minByOrNull { distanceMetres(latitude, longitude, route[it].first, route[it].second) } ?: 0
+    val samples = mutableListOf<Pair<Double, Double>>()
+    var walked = 0.0
+    var last = route[nearestIndex]
+    samples.add(last)
+    for (i in (nearestIndex + 1) until route.size) {
+        val p = route[i]
+        walked += distanceMetres(last.first, last.second, p.first, p.second)
+        last = p
+        if (walked >= 400.0) { samples.add(p); walked = 0.0 }
+        if (samples.size >= 14 || distanceMetres(latitude, longitude, p.first, p.second) > 6500.0) break
+    }
+    val selectors = samples.joinToString(";") { (lat, lon) ->
+        "node(around:85,$lat,$lon)[highway=traffic_signals];node(around:85,$lat,$lon)[highway=stop];node(around:85,$lat,$lon)[highway=give_way];node(around:85,$lat,$lon)[highway=speed_camera];node(around:85,$lat,$lon)[enforcement=maxspeed];node(around:85,$lat,$lon)[traffic_calming];way(around:85,$lat,$lon)[highway=construction]"
+    }
+    val encoded = URLEncoder.encode("[out:json][timeout:15];($selectors);out center tags;", "UTF-8")
     for (endpoint in listOf("https://overpass-api.de/api/interpreter?data=$encoded", "https://overpass.kumi.systems/api/interpreter?data=$encoded")) {
         try {
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply { requestMethod = "GET"; connectTimeout = 8000; readTimeout = 12000; setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0") }
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"; connectTimeout = 9000; readTimeout = 15000
+                setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0")
+            }
             val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
             val elements = JSONObject(body).optJSONArray("elements") ?: continue
             val alerts = mutableListOf<RoadAlert>()
@@ -293,6 +323,8 @@ private suspend fun lookupNearbyRoadAlerts(latitude: Double, longitude: Double):
                 val center = element.optJSONObject("center")
                 val lat = if (element.has("lat")) element.optDouble("lat") else center?.optDouble("lat") ?: continue
                 val lon = if (element.has("lon")) element.optDouble("lon") else center?.optDouble("lon") ?: continue
+                val routeIndex = route.indices.minByOrNull { distanceMetres(lat, lon, route[it].first, route[it].second) } ?: continue
+                if (routeIndex < nearestIndex || distanceMetres(lat, lon, route[routeIndex].first, route[routeIndex].second) > 100.0) continue
                 val highway = tags.optString("highway")
                 val label = when {
                     highway == "traffic_signals" -> "Traffic lights"
@@ -305,14 +337,14 @@ private suspend fun lookupNearbyRoadAlerts(latitude: Double, longitude: Double):
                 }
                 alerts.add(RoadAlert(label, distanceMetres(latitude, longitude, lat, lon)))
             }
-            return@withContext alerts.distinctBy { it.label }.sortedBy { it.distanceMetres }.take(3)
+            return@withContext alerts.sortedBy { it.distanceMetres }
+                .distinctBy { it.label + "|" + (it.distanceMetres / 75).toInt() }.take(4)
         } catch (_: Exception) { }
     }
     emptyList()
 }
-
 private suspend fun lookupRoadContext(latitude: Double, longitude: Double): RoadContext? = withContext(Dispatchers.IO) {
-    val query = "[out:json][timeout:12];way(around:35,$latitude,$longitude)[\"highway\"];out center tags;"
+    val query = "[out:json][timeout:12];way(around:120,$latitude,$longitude)[\"highway\"];out center tags;"
     val encoded = URLEncoder.encode(query, "UTF-8")
     val endpoints = listOf("https://overpass-api.de/api/interpreter?data=$encoded", "https://overpass.kumi.systems/api/interpreter?data=$encoded")
     for (endpoint in endpoints) {
@@ -337,7 +369,7 @@ private suspend fun lookupRoadContext(latitude: Double, longitude: Double): Road
                 if (distance >= bestDistance) continue
                 val tags = way.optJSONObject("tags") ?: continue
                 val name = tags.optString("name").ifBlank { tags.optString("ref") }
-                val rawLimit = tags.optString("maxspeed").ifBlank { tags.optString("maxspeed:forward") }
+                val rawLimit = tags.optString("maxspeed:forward").ifBlank { tags.optString("maxspeed") }.ifBlank { tags.optString("maxspeed:lanes") }
                 val numeric = Regex("\\d+(?:\\.\\d+)?").find(rawLimit)?.value?.toDoubleOrNull()
                 val limit = when {
                     numeric == null -> null
@@ -796,7 +828,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 val result = lookupRoadContext(lat, lon)
                 if (result != null) { currentRoadName = result.name; currentSpeedLimit = result.speedLimit }
                 else { currentRoadName = "Road name unavailable"; currentSpeedLimit = null }
-                nearbyRoadAlerts = lookupNearbyRoadAlerts(lat, lon)
+                nearbyRoadAlerts = lookupNearbyRoadAlerts(lat, lon, RoutePlanStore.coordinatesJson)
             }
             kotlinx.coroutines.delay(45_000L)
         }
@@ -1092,11 +1124,13 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
 
-                Surface(shape = RoundedCornerShape(7.dp), color = Color(0xA6101A22),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667E9BAD)),
-                    modifier = Modifier.align(Alignment.Center).offset(y = 48.dp).widthIn(max = 185.dp)) {
-                    Text(currentRoadName.take(34), modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                        color = White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                if (currentRoadName.isNotBlank() && !currentRoadName.contains("unavailable", ignoreCase = true) && currentRoadName != "Finding road…") {
+                    Surface(shape = RoundedCornerShape(7.dp), color = Color(0xA6101A22),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x667E9BAD)),
+                        modifier = Modifier.align(Alignment.Center).offset(y = 48.dp).widthIn(max = 185.dp)) {
+                        Text(currentRoadName.take(34), modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            color = White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
                 }
                 if (nearbyRoadAlerts.isNotEmpty()) {
                     Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp, start = 5.dp, end = 5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1189,16 +1223,11 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         "${mins / 60} h ${mins % 60} min"
                     } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
                     val arrivalTime = remainingDurationSeconds?.let { java.text.SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(System.currentTimeMillis() + (it * 1000.0).toLong())) } ?: "—"
-                    val durationLabel = RoutePlanStore.totalDurationSeconds.takeIf { it > 0.0 }?.let {
-                        val mins = (it / 60.0).toInt()
-                        "${mins / 60} h ${mins % 60} min"
-                    } ?: "—"
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                             listOf(
                                 "DISTANCE LEFT" to distanceLabel,
                                 "ETA" to etaLabel,
-                                "DURATION" to durationLabel,
                                 "ARRIVAL" to arrivalTime
                             ).forEach { (label, value) ->
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1362,7 +1391,14 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                         }
                                     }
                                 }, color = Color(0xFF26333D), shape = RoundedCornerShape(7.dp)) {
-                                    Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
+                                    Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f).padding(vertical = 6.dp))
+                                        Text("ROAD PREVIEW", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                val previewUri = android.net.Uri.parse("https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${place.latitude},${place.longitude}")
+                                                runCatching { appContext.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, previewUri).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                                            }.padding(8.dp))
+                                    }
                                 }
                             }
                         }
@@ -2265,7 +2301,7 @@ private suspend fun searchMapPlaces(
     val encoded = URLEncoder.encode(query, "UTF-8")
     val bias = if (biasLatitude != null && biasLongitude != null)
         "&lat=$biasLatitude&lon=$biasLongitude&zoom=14&location_bias_scale=0.2" else ""
-    val connection = (URL("https://photon.komoot.io/api/?q=$encoded&limit=10&lang=en$bias").openConnection() as HttpURLConnection).apply {
+    val connection = (URL("https://photon.komoot.io/api/?q=$encoded&limit=20&lang=en$bias").openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"; setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0 (Android map autocomplete)"); connectTimeout = 12000; readTimeout = 15000
     }
     try {
@@ -2278,8 +2314,10 @@ private suspend fun searchMapPlaces(
             val lon = coordinates.optDouble(0, Double.NaN)
             val lat = coordinates.optDouble(1, Double.NaN)
             val props = feature.optJSONObject("properties") ?: org.json.JSONObject()
+            val houseAndStreet = listOf(props.optString("housenumber"), props.optString("street"))
+                .filter { it.isNotBlank() }.joinToString(" ")
             val parts = listOf(
-                props.optString("housenumber"), props.optString("name"), props.optString("street"),
+                houseAndStreet.ifBlank { props.optString("name") },
                 props.optString("district"), props.optString("city"), props.optString("county"),
                 props.optString("postcode"), props.optString("country")
             ).filter { it.isNotBlank() }.distinct()
