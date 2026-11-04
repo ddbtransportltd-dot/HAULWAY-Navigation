@@ -43,6 +43,7 @@ jobs:
           GOOGLE_STREETVIEW_API_KEY: ${{ secrets.GOOGLE_STREETVIEW_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           MAPILLARY_ACCESS_TOKEN: ${{ secrets.MAPILLARY_ACCESS_TOKEN }}
+          TOMTOM_TRAFFIC_API_KEY: ${{ secrets.TOMTOM_TRAFFIC_API_KEY }}
         run: |
           chmod +x ./gradlew
           ./gradlew --no-daemon assembleDebug
