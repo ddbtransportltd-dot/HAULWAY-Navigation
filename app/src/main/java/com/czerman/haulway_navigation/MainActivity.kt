@@ -727,7 +727,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var liveAccuracy by remember { mutableStateOf<Float?>(null) }
     var currentRoadName by remember { mutableStateOf("Finding road…") }
     var currentSpeedLimit by remember { mutableStateOf<String?>(null) }
-    var lastRoadLookupAt by remember { mutableLongStateOf(0L) }
     var activeManeuverIndex by remember { mutableIntStateOf(0) }
     var distanceToManeuver by remember { mutableStateOf<Double?>(null) }
     var offRoute by remember { mutableStateOf(false) }
@@ -760,7 +759,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             kotlinx.coroutines.delay(20_000L)
             val lat = liveLatitude ?: continue
             val lon = liveLongitude ?: continue
-            lastRoadLookupAt = System.currentTimeMillis()
             val result = lookupRoadContext(lat, lon)
             if (result != null) {
                 currentRoadName = result.name
