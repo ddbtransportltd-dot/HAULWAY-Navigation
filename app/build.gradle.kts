@@ -43,8 +43,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 20
-        versionName = "2.1.6-vision16-driving-guidance"
+        versionCode = 21
+        versionName = "2.1.7-vision17-navigation-layout-alerts"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
