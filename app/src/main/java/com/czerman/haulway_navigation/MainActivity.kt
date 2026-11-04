@@ -787,6 +787,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var mapSearchLoading by remember { mutableStateOf(false) }
     var mapSearchError by remember { mutableStateOf<String?>(null) }
     var selectedMapSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var roadPreviewPlace by remember { mutableStateOf<MapSearchResult?>(null) }
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
     var followEnabled by remember { mutableStateOf(true) }
@@ -1404,10 +1405,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f).padding(vertical = 6.dp))
                                         Text("ROAD PREVIEW", color = Color(0xFF70C9FF), fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable {
-                                                val previewUri = android.net.Uri.parse("https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${place.latitude},${place.longitude}")
-                                                runCatching { appContext.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, previewUri).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                                            }.padding(8.dp))
+                                            modifier = Modifier.clickable { roadPreviewPlace = place }.padding(8.dp))
                                     }
                                 }
                             }
