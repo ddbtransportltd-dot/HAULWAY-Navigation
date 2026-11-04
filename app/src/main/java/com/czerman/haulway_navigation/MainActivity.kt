@@ -274,6 +274,50 @@ private fun formatNavigationDistance(metres: Double): String = when {
     else -> "${(metres / 5).toInt() * 5} m"
 }
 
+private data class RoadContext(val name: String, val speedLimit: String?)
+
+private suspend fun lookupRoadContext(latitude: Double, longitude: Double): RoadContext? = withContext(Dispatchers.IO) {
+    val query = "[out:json][timeout:12];way(around:35,$latitude,$longitude)[\"highway\"];out center tags;"
+    val encoded = URLEncoder.encode(query, "UTF-8")
+    val endpoints = listOf("https://overpass-api.de/api/interpreter?data=$encoded", "https://overpass.kumi.systems/api/interpreter?data=$encoded")
+    for (endpoint in endpoints) {
+        try {
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 8000
+                readTimeout = 12000
+                setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0")
+            }
+            val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
+            val elements = JSONObject(body).optJSONArray("elements") ?: continue
+            var bestDistance = Double.MAX_VALUE
+            var best: RoadContext? = null
+            for (i in 0 until elements.length()) {
+                val way = elements.optJSONObject(i) ?: continue
+                val center = way.optJSONObject("center") ?: continue
+                val lat = center.optDouble("lat", Double.NaN)
+                val lon = center.optDouble("lon", Double.NaN)
+                if (!lat.isFinite() || !lon.isFinite()) continue
+                val distance = distanceMetres(latitude, longitude, lat, lon)
+                if (distance >= bestDistance) continue
+                val tags = way.optJSONObject("tags") ?: continue
+                val name = tags.optString("name").ifBlank { tags.optString("ref") }
+                val rawLimit = tags.optString("maxspeed").ifBlank { tags.optString("maxspeed:forward") }
+                val numeric = Regex("\\d+(?:\\.\\d+)?").find(rawLimit)?.value?.toDoubleOrNull()
+                val limit = when {
+                    numeric == null -> null
+                    rawLimit.contains("km", true) -> "${(numeric * 0.621371).toInt()} mph"
+                    else -> "${numeric.toInt()} mph"
+                }
+                bestDistance = distance
+                best = RoadContext(name.ifBlank { "Unnamed road" }, limit)
+            }
+            return@withContext best
+        } catch (_: Exception) { }
+    }
+    null
+}
+
 private fun resolveHaulwayCurrentLocation(context: Context): Pair<Double, Double> {
     val fine = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val coarse = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -679,6 +723,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var liveLongitude by remember { mutableStateOf<Double?>(null) }
     var liveBearing by remember { mutableStateOf<Float?>(null) }
     var liveAccuracy by remember { mutableStateOf<Float?>(null) }
+    var currentRoadName by remember { mutableStateOf("Finding road…") }
+    var currentSpeedLimit by remember { mutableStateOf<String?>(null) }
     var activeManeuverIndex by remember { mutableIntStateOf(0) }
     var distanceToManeuver by remember { mutableStateOf<Double?>(null) }
     var offRoute by remember { mutableStateOf(false) }
@@ -706,6 +752,20 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             speechReady = false
         }
     }
+    LaunchedEffect(liveLatitude, liveLongitude) {
+        val lat = liveLatitude ?: return@LaunchedEffect
+        val lon = liveLongitude ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(900)
+        val result = lookupRoadContext(lat, lon)
+        if (result != null) {
+            currentRoadName = result.name
+            currentSpeedLimit = result.speedLimit
+        } else {
+            currentRoadName = "Road name unavailable"
+            currentSpeedLimit = null
+        }
+    }
+
     LaunchedEffect(RoutePlanStore.destination) {
         activeManeuverIndex = 0
         distanceToManeuver = null
@@ -943,7 +1003,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, followEnabled, tilt3D, selectedMapSearchLocation)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, followEnabled, tilt3D, selectedMapSearchLocation, distanceToManeuver)
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
@@ -984,7 +1044,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         shadowElevation = 7.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("—", color = Color(0xFF20252A), fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(currentSpeedLimit ?: "—", color = Color(0xFF20252A), fontSize = if (currentSpeedLimit == null) 25.sp else 17.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                         }
                     }
                     Surface(shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))) {
@@ -996,14 +1056,18 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
 
-                // Voice control sits near the top-right of the map, as in the Vision 2 reference.
+                Surface(shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575)), modifier = Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 128.dp).widthIn(max = 190.dp)) {
+                    Text(currentRoadName, modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp), color = White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                }
+
+                // Voice control matches the globe control's rounded panel.
                 Surface(
-                    Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).size(38.dp).clickable { soundOn = !soundOn },
-                    shape = CircleShape, color = panel, border = androidx.compose.foundation.BorderStroke(1.dp, border)
+                    Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).size(38.dp).clickable { soundOn = !soundOn },
+                    shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(if (soundOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                            if (soundOn) "Voice guidance on" else "Voice guidance off", tint = White)
+                            if (soundOn) "Voice guidance on" else "Voice guidance off", tint = White, modifier = Modifier.size(19.dp))
                     }
                 }
 
@@ -1037,13 +1101,16 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     .background(Color(0xFF0B1117)).padding(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                Text("NEXT 5 MANOEUVRES", color = Color(0xFF91A2AE), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp))
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
-                    val maneuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)
-                    if (maneuver != null) {
-                        val distanceLabel = distanceToManeuver?.let(::formatNavigationDistance) ?: "—"
+                    RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(5).forEachIndexed { offset, item ->
+                        val metres = if (offset == 0) distanceToManeuver else distanceAlongRouteMetres(
+                            liveLatitude ?: item.latitude, liveLongitude ?: item.longitude,
+                            item.latitude, item.longitude, RoutePlanStore.coordinatesJson
+                        )
                         NavigationStepCard(
-                            maneuverIconFor(maneuver.label), distanceLabel,
-                            maneuver.label + if (maneuver.roadName.isNotBlank()) " · ${maneuver.roadName}" else "",
+                            maneuverIconFor(item.label), metres?.let(::formatNavigationDistance) ?: "—",
+                            item.label + if (item.roadName.isNotBlank()) " · ${item.roadName}" else "",
                             blue
                         )
                     }
@@ -1083,6 +1150,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                val arrivalTime = remainingDurationSeconds?.let { java.text.SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(System.currentTimeMillis() + (it * 1000.0).toLong())) } ?: "—"
+                                Text("ARRIVAL  $arrivalTime", color = Color(0xFFD5EAF7), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                         }
                     }
@@ -1365,8 +1434,8 @@ private fun updateHaulwayNativeMapOverlays(
                 SymbolLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
                     PropertyFactory.iconImage("haulway-vehicle-arrow"),
                     PropertyFactory.iconSize(0.72f),
-                    PropertyFactory.iconRotate(Expression.get("bearing")),
-                    PropertyFactory.iconRotationAlignment("map"),
+                    PropertyFactory.iconRotate(0f),
+                    PropertyFactory.iconRotationAlignment("viewport"),
                     PropertyFactory.iconAllowOverlap(true),
                     PropertyFactory.iconIgnorePlacement(true)
                 )
@@ -1405,7 +1474,8 @@ private fun HaulwayNativeMapCanvas(
     followEnabled: Boolean = true,
     tilt3D: Boolean = false,
     searchLocation: Pair<Double, Double>? = null,
-    showGlobeControl: Boolean = false
+    showGlobeControl: Boolean = false,
+    distanceToManeuver: Double? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1517,7 +1587,7 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, tilt3D) {
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, tilt3D, distanceToManeuver) {
         val map = mapLibreMap ?: return@LaunchedEffect
         val camera = if (globeMode) {
             CameraPosition.Builder()
@@ -1529,15 +1599,23 @@ private fun HaulwayNativeMapCanvas(
         } else {
             val hasGps = latitude != null && longitude != null
             val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else LatLng(53.4808, -2.2426)
-            val targetZoom = if (hasGps && followEnabled) 15.2 else (zoom + 6.0).coerceIn(3.0, 13.0)
+            val baseZoom = if (hasGps && followEnabled) 13.2 else (zoom + 4.0).coerceIn(3.0, 11.0)
+            val maneuverZoom = when {
+                distanceToManeuver == null -> 0.0
+                distanceToManeuver < 120.0 -> 2.0
+                distanceToManeuver < 350.0 -> 1.5
+                distanceToManeuver < 800.0 -> 0.8
+                else -> 0.0
+            }
+            val targetZoom = (baseZoom + maneuverZoom).coerceAtMost(16.0)
             CameraPosition.Builder()
                 .target(target)
                 .zoom(targetZoom)
                 .tilt(if (tilt3D && hasGps && followEnabled) 48.0 else 0.0)
-                .bearing(0.0)
+                .bearing(if (hasGps && followEnabled) (bearing ?: 0f).toDouble() else 0.0)
                 .build()
         }
-        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 450)
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 850)
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF101B24))) {
@@ -1593,7 +1671,8 @@ private fun RealNavigationMap(
     mapStyleRequest: Int,
     followEnabled: Boolean,
     tilt3D: Boolean,
-    searchLocation: Pair<Double, Double>?
+    searchLocation: Pair<Double, Double>?,
+    distanceToManeuver: Double? = null
 ) {
     HaulwayNativeMapCanvas(
         routeJson = RoutePlanStore.coordinatesJson,
@@ -1606,7 +1685,8 @@ private fun RealNavigationMap(
         followEnabled = followEnabled,
         tilt3D = tilt3D,
         searchLocation = searchLocation,
-        showGlobeControl = true
+        showGlobeControl = true,
+        distanceToManeuver = distanceToManeuver
     )
 }
 
