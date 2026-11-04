@@ -2349,7 +2349,6 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
     }
 }
 
-@Composable
 private data class HaulwayTrafficIncident(
     val id: String,
     val category: String,
@@ -2456,6 +2455,7 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
         }
     }
 
+@Composable
 private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     data class TrafficLayer(val name: String, val group: String, val enabledByDefault: Boolean = true)
     val layers = listOf(
