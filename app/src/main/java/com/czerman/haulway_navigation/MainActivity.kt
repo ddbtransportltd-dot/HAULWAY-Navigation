@@ -1114,12 +1114,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
 
                 // Voice control matches the globe control's rounded panel.
                 Surface(
-                    Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).size(38.dp).clickable { soundOn = !soundOn },
+                    Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).size(44.dp).clickable { soundOn = !soundOn },
                     shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(if (soundOn) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                            if (soundOn) "Voice guidance on" else "Voice guidance off", tint = White, modifier = Modifier.size(19.dp))
+                            if (soundOn) "Voice guidance on" else "Voice guidance off", tint = White, modifier = Modifier.size(25.dp))
                     }
                 }
 
@@ -1271,9 +1271,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             }
         }
         Dialog(onDismissRequest = { showMapSearch = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            // Side-drawer search overlay; map remains visible to the right.
+            Box(Modifier.fillMaxSize().padding(start = 8.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterStart) {
             Surface(
-                modifier = Modifier.fillMaxWidth(0.78f),
-                color = Color(0xFF18232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp
+                modifier = Modifier.fillMaxHeight().fillMaxWidth(0.46f),
+                color = Color(0xF218232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1365,6 +1368,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
             }
+            }
         }
     }
 }
@@ -1391,17 +1395,17 @@ private fun MapQuickActionCard(icon: ImageVector, title: String, subtitle: Strin
 
 @Composable
 private fun NavigationStepCard(icon: ImageVector, distance: String, destination: String, accent: Color, isParking: Boolean = false, compact: Boolean = false) {
-    Surface(Modifier.fillMaxWidth().height(if (compact) 40.dp else 54.dp), shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))) {
-        Row(Modifier.padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+    Surface(Modifier.fillMaxWidth().height(if (compact) 54.dp else 58.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.7.dp, Color(0x665F7482))) {
+        Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             if (isParking) {
-                Surface(color = Color(0xFF087CCB), shape = RoundedCornerShape(3.dp), modifier = Modifier.size(26.dp)) {
-                    Box(contentAlignment = Alignment.Center) { Text("P", color = White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                Surface(color = Color(0xFF087CCB), shape = RoundedCornerShape(4.dp), modifier = Modifier.size(32.dp)) {
+                    Box(contentAlignment = Alignment.Center) { Text("P", color = White, fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                 }
-            } else Icon(icon, null, tint = White, modifier = Modifier.size(23.dp))
-            Spacer(Modifier.width(if (compact) 5.dp else 8.dp))
-            Column {
-                Text(distance, color = White, fontSize = if (compact) 11.sp else 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                Text(destination, color = Color(0xFFD0D7DD), fontSize = if (compact) 8.sp else 10.sp, maxLines = 1)
+            } else Icon(icon, null, tint = White, modifier = Modifier.size(if (compact) 29.dp else 25.dp))
+            Spacer(Modifier.width(if (compact) 9.dp else 8.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(distance, color = White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(destination, color = Color(0xFFE0E7EC), fontSize = 11.sp, maxLines = 2)
             }
         }
     }
@@ -1588,7 +1592,7 @@ private fun HaulwayNativeMapCanvas(
         mapView.getMapAsync { map ->
             mapLibreMap = map
             map.uiSettings.isRotateGesturesEnabled = true
-            map.uiSettings.isCompassEnabled = true
+            map.uiSettings.isCompassEnabled = false
             map.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(53.4808, -2.2426))
                 .zoom(6.0)
