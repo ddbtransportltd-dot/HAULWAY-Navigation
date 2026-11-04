@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import android.os.Bundle
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
 import android.os.Looper
 import android.content.Context
 import android.content.pm.PackageManager
@@ -1366,6 +1368,12 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
 
 private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
+private object HaulwayGpsMarkerAnimation {
+    var latitude: Double? = null
+    var longitude: Double? = null
+    var animator: ValueAnimator? = null
+}
+
 private fun updateHaulwayNativeMapOverlays(
     style: Style,
     routeJson: String?,
@@ -1408,14 +1416,11 @@ private fun updateHaulwayNativeMapOverlays(
     }
 
     if (latitude != null && longitude != null) {
-        val point = Feature.fromGeometry(Point.fromLngLat(longitude, latitude)).apply {
-            addNumberProperty("bearing", (bearing ?: 0f).toDouble())
-        }
         val source = style.getSourceAs<GeoJsonSource>("haulway-vehicle-source")
-        if (source != null) {
-            source.setGeoJson(point)
-        } else {
+        if (source == null) {
             // GPS marker is geographically anchored and drawn above the route line.
+            val initialPoint = Feature.fromGeometry(Point.fromLngLat(longitude, latitude))
+            style.addSource(GeoJsonSource("haulway-vehicle-source", initialPoint))
             val bitmap = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(bitmap)
             val arrow = android.graphics.Path().apply {
@@ -1433,7 +1438,6 @@ private fun updateHaulwayNativeMapOverlays(
             }
             canvas.drawPath(arrow, outline)
             style.addImage("haulway-vehicle-arrow", bitmap)
-            style.addSource(GeoJsonSource("haulway-vehicle-source", point))
             style.addLayer(
                 SymbolLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
                     PropertyFactory.iconImage("haulway-vehicle-arrow"),
@@ -1444,6 +1448,27 @@ private fun updateHaulwayNativeMapOverlays(
                     PropertyFactory.iconIgnorePlacement(true)
                 )
             )
+            HaulwayGpsMarkerAnimation.latitude = latitude
+            HaulwayGpsMarkerAnimation.longitude = longitude
+        } else {
+            val startLat = HaulwayGpsMarkerAnimation.latitude ?: latitude
+            val startLon = HaulwayGpsMarkerAnimation.longitude ?: longitude
+            HaulwayGpsMarkerAnimation.animator?.cancel()
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 900L
+                interpolator = LinearInterpolator()
+                addUpdateListener { animation ->
+                    val fraction = animation.animatedValue as Float
+                    val animatedLat = startLat + (latitude - startLat) * fraction
+                    val animatedLon = startLon + (longitude - startLon) * fraction
+                    val animatedFeature = Feature.fromGeometry(Point.fromLngLat(animatedLon, animatedLat))
+                    source.setGeoJson(animatedFeature)
+                    HaulwayGpsMarkerAnimation.latitude = animatedLat
+                    HaulwayGpsMarkerAnimation.longitude = animatedLon
+                }
+            }
+            HaulwayGpsMarkerAnimation.animator = animator
+            animator.start()
         }
     }
 
