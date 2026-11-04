@@ -725,6 +725,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var liveAccuracy by remember { mutableStateOf<Float?>(null) }
     var currentRoadName by remember { mutableStateOf("Finding road…") }
     var currentSpeedLimit by remember { mutableStateOf<String?>(null) }
+    var lastRoadLookupAt by remember { mutableLongStateOf(0L) }
     var activeManeuverIndex by remember { mutableIntStateOf(0) }
     var distanceToManeuver by remember { mutableStateOf<Double?>(null) }
     var offRoute by remember { mutableStateOf(false) }
@@ -755,6 +756,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     LaunchedEffect(liveLatitude, liveLongitude) {
         val lat = liveLatitude ?: return@LaunchedEffect
         val lon = liveLongitude ?: return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        if (now - lastRoadLookupAt < 20_000L) return@LaunchedEffect
+        lastRoadLookupAt = now
         kotlinx.coroutines.delay(900)
         val result = lookupRoadContext(lat, lon)
         if (result != null) {
@@ -1599,7 +1603,7 @@ private fun HaulwayNativeMapCanvas(
         } else {
             val hasGps = latitude != null && longitude != null
             val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else LatLng(53.4808, -2.2426)
-            val baseZoom = if (hasGps && followEnabled) 13.2 else (zoom + 4.0).coerceIn(3.0, 11.0)
+            val baseZoom = if (hasGps && followEnabled) (13.2 + (zoom - 4)) else (zoom + 4.0).coerceIn(3.0, 11.0)
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
