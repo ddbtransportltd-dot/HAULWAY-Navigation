@@ -2607,7 +2607,7 @@ private suspend fun searchMapPlaces(
 
 private suspend fun searchMapStreetNumbers(street: MapSearchResult): List<MapSearchResult> = withContext(Dispatchers.IO) {
     val streetName = street.name.substringBefore(",").trim()
-    val escapedStreet = streetName.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\"")
+    val escapedStreet = streetName.replace("\\", "\\\\").replace("\"", "\\\"")
     val query = "[out:json][timeout:15];(node(around:1800,${street.latitude},${street.longitude})[\"addr:street\"~\"^$escapedStreet$\",i][\"addr:housenumber\"];way(around:1800,${street.latitude},${street.longitude})[\"addr:street\"~\"^$escapedStreet$\",i][\"addr:housenumber\"];);out center tags 80;"
     val endpoint = "https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8")
     val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
