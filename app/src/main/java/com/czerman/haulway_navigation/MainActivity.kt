@@ -344,15 +344,15 @@ private suspend fun lookupNearbyRoadAlerts(latitude: Double, longitude: Double, 
     emptyList()
 }
 private suspend fun lookupRoadContext(latitude: Double, longitude: Double): RoadContext? = withContext(Dispatchers.IO) {
-    val query = "[out:json][timeout:12];way(around:120,$latitude,$longitude)[\"highway\"];out center tags;"
+    // Ask Overpass for road geometry, not only each way's centre. Long roads often have
+    // a centre point far away from the vehicle even when the road itself is right beside it.
+    val query = "[out:json][timeout:12];way(around:120,$latitude,$longitude)[\"highway\"];out geom tags;"
     val encoded = URLEncoder.encode(query, "UTF-8")
     val endpoints = listOf("https://overpass-api.de/api/interpreter?data=$encoded", "https://overpass.kumi.systems/api/interpreter?data=$encoded")
     for (endpoint in endpoints) {
         try {
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 8000
-                readTimeout = 12000
+                requestMethod = "GET"; connectTimeout = 8000; readTimeout = 12000
                 setRequestProperty("User-Agent", "HAULWAY-Navigation/1.0")
             }
             val body = try { connection.inputStream.bufferedReader().use { it.readText() } } finally { connection.disconnect() }
@@ -361,15 +361,26 @@ private suspend fun lookupRoadContext(latitude: Double, longitude: Double): Road
             var best: RoadContext? = null
             for (i in 0 until elements.length()) {
                 val way = elements.optJSONObject(i) ?: continue
-                val center = way.optJSONObject("center") ?: continue
-                val lat = center.optDouble("lat", Double.NaN)
-                val lon = center.optDouble("lon", Double.NaN)
-                if (!lat.isFinite() || !lon.isFinite()) continue
-                val distance = distanceMetres(latitude, longitude, lat, lon)
-                if (distance >= bestDistance) continue
                 val tags = way.optJSONObject("tags") ?: continue
+                val geometry = way.optJSONArray("geometry")
+                var distance = Double.MAX_VALUE
+                if (geometry != null) {
+                    for (j in 0 until geometry.length()) {
+                        val point = geometry.optJSONObject(j) ?: continue
+                        val lat = point.optDouble("lat", Double.NaN)
+                        val lon = point.optDouble("lon", Double.NaN)
+                        if (lat.isFinite() && lon.isFinite()) distance = minOf(distance, distanceMetres(latitude, longitude, lat, lon))
+                    }
+                } else {
+                    val center = way.optJSONObject("center") ?: continue
+                    val lat = center.optDouble("lat", Double.NaN)
+                    val lon = center.optDouble("lon", Double.NaN)
+                    if (lat.isFinite() && lon.isFinite()) distance = distanceMetres(latitude, longitude, lat, lon)
+                }
+                if (distance >= bestDistance) continue
                 val name = tags.optString("name").ifBlank { tags.optString("ref") }
-                val rawLimit = tags.optString("maxspeed:forward").ifBlank { tags.optString("maxspeed") }.ifBlank { tags.optString("maxspeed:lanes") }
+                val rawLimit = tags.optString("maxspeed:forward").ifBlank { tags.optString("maxspeed") }
+                    .ifBlank { tags.optString("maxspeed:lanes") }.trim()
                 val numeric = Regex("\\d+(?:\\.\\d+)?").find(rawLimit)?.value?.toDoubleOrNull()
                 val limit = when {
                     numeric == null -> null
@@ -384,7 +395,6 @@ private suspend fun lookupRoadContext(latitude: Double, longitude: Double): Road
     }
     null
 }
-
 private fun resolveHaulwayCurrentLocation(context: Context): Pair<Double, Double> {
     val fine = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     val coarse = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -1071,7 +1081,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, followEnabled, tilt3D, selectedMapSearchLocation, distanceToManeuver)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, followEnabled, tilt3D, selectedMapSearchLocation, distanceToManeuver) { followEnabled = false }
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
@@ -1591,7 +1601,8 @@ private fun HaulwayNativeMapCanvas(
     tilt3D: Boolean = false,
     searchLocation: Pair<Double, Double>? = null,
     showGlobeControl: Boolean = false,
-    distanceToManeuver: Double? = null
+    distanceToManeuver: Double? = null,
+    onUserGesture: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1601,6 +1612,7 @@ private fun HaulwayNativeMapCanvas(
     var styleError by remember { mutableStateOf<String?>(null) }
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
     var cachedStyleJson by remember { mutableStateOf<String?>(null) }
+    val latestOnUserGesture by rememberUpdatedState(onUserGesture)
     val activeStyleUrl = if (mapStyleRequest % 2 == 0) {
         HAULWAY_NATIVE_MAP_STYLE_URL
     } else {
@@ -1634,6 +1646,9 @@ private fun HaulwayNativeMapCanvas(
             mapLibreMap = map
             map.uiSettings.isRotateGesturesEnabled = true
             map.uiSettings.isCompassEnabled = false
+            map.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) latestOnUserGesture()
+            }
             map.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(53.4808, -2.2426))
                 .zoom(6.0)
@@ -1718,8 +1733,9 @@ private fun HaulwayNativeMapCanvas(
                 .build()
         } else {
             val hasGps = latitude != null && longitude != null
-            val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else LatLng(53.4808, -2.2426)
-            val baseZoom = if (hasGps && followEnabled) (13.2 + (zoom - 4)) else (zoom + 4.0).coerceIn(3.0, 11.0)
+            val currentCamera = map.cameraPosition
+            val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
+            val baseZoom = if (hasGps && followEnabled) (13.2 + (zoom - 4)) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
@@ -1731,8 +1747,8 @@ private fun HaulwayNativeMapCanvas(
             CameraPosition.Builder()
                 .target(target)
                 .zoom(targetZoom)
-                .tilt(if (tilt3D && hasGps && followEnabled) 48.0 else 0.0)
-                .bearing(if (hasGps && followEnabled) (bearing ?: 0f).toDouble() else 0.0)
+                .tilt(if (followEnabled && tilt3D && hasGps) 48.0 else if (!followEnabled) currentCamera.tilt else 0.0)
+                .bearing(if (hasGps && followEnabled) (bearing ?: 0f).toDouble() else if (!followEnabled) currentCamera.bearing else 0.0)
                 .build()
         }
         map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 850)
@@ -1792,7 +1808,8 @@ private fun RealNavigationMap(
     followEnabled: Boolean,
     tilt3D: Boolean,
     searchLocation: Pair<Double, Double>?,
-    distanceToManeuver: Double? = null
+    distanceToManeuver: Double? = null,
+    onUserGesture: () -> Unit = {}
 ) {
     HaulwayNativeMapCanvas(
         routeJson = RoutePlanStore.coordinatesJson,
@@ -1806,7 +1823,8 @@ private fun RealNavigationMap(
         tilt3D = tilt3D,
         searchLocation = searchLocation,
         showGlobeControl = false,
-        distanceToManeuver = distanceToManeuver
+        distanceToManeuver = distanceToManeuver,
+        onUserGesture = onUserGesture
     )
 }
 
