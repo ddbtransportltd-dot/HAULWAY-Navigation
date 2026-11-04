@@ -1506,22 +1506,26 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Text("CLOSE", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold,
                             modifier = Modifier.clickable { showStreetView = false }.padding(8.dp))
                     }
-                    AndroidView(Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp)), factory = { viewContext ->
-                        android.webkit.WebView(viewContext).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.loadWithOverviewMode = true
-                            settings.useWideViewPort = true
-                            webViewClient = android.webkit.WebViewClient()
-                            val key = BuildConfig.GOOGLE_MAPS_API_KEY
-                            val url = if (key.isNotBlank()) {
-                                "https://www.google.com/maps/embed/v1/streetview?key=" + URLEncoder.encode(key, "UTF-8") + "&location=" + place.latitude + "," + place.longitude + "&heading=0&pitch=0&fov=90"
-                            } else {
-                                "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + place.latitude + "," + place.longitude
+                    AndroidView(
+                        factory = { viewContext: Context ->
+                            android.webkit.WebView(viewContext).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.loadWithOverviewMode = true
+                                settings.useWideViewPort = true
+                                webViewClient = android.webkit.WebViewClient()
+                                val key = BuildConfig.GOOGLE_MAPS_API_KEY
+                                val url = if (key.isNotBlank()) {
+                                    "https://www.google.com/maps/embed/v1/streetview?key=" + URLEncoder.encode(key, "UTF-8") + "&location=" + place.latitude + "," + place.longitude + "&heading=0&pitch=0&fov=90"
+                                } else {
+                                    "https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=" + place.latitude + "," + place.longitude
+                                }
+                                loadUrl(url)
                             }
-                            loadUrl(url)
-                        }
-                    }, update = { })
+                        },
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp)),
+                        update = { _: android.webkit.WebView -> }
+                    )
                 }
             }
         }
