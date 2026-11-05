@@ -1536,6 +1536,7 @@ function fetchPoiCategory(category){
     return {lat,lon,kind,name,icon};
    }).filter(Boolean).slice(0,80);
    drawPoiMarkers();status.style.display='none';
+   try{if(window.HaulwayPoiBridge&&window.HaulwayPoiBridge.onPoiResults)window.HaulwayPoiBridge.onPoiResults(JSON.stringify(poiFeatures));}catch(e){console.warn('POI result bridge unavailable: '+e);}
    fetchM62Overlay(bounds,id);
    console.log('HAULWAY POI '+category+': '+poiFeatures.length+' real OpenStreetMap features');
   }).catch(err=>{
@@ -1818,8 +1819,9 @@ private fun HaulwayHomeScreen(onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTrafficIncident> = emptyList(), poiCategory: String? = null, onViewportBounds: (String) -> Unit = {}) {
+private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTrafficIncident> = emptyList(), poiCategory: String? = null, onPoiResults: (String) -> Unit = {}, onViewportBounds: (String) -> Unit = {}) {
     val viewportCallback = onViewportBounds
+    val poiResultsCallback = onPoiResults
     var mapView by remember { mutableStateOf<WebView?>(null) }
     var pageReady by remember { mutableStateOf(false) }
     var lastRoute by remember { mutableStateOf<String?>(null) }
@@ -1857,6 +1859,10 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 addJavascriptInterface(object {
+                    @JavascriptInterface
+                    fun onPoiResults(json: String) {
+                        android.os.Handler(Looper.getMainLooper()).post { poiResultsCallback(json) }
+                    }
                     @JavascriptInterface
                     fun onViewportBounds(json: String) {
                         android.os.Handler(Looper.getMainLooper()).post { viewportCallback(json) }
@@ -3037,9 +3043,9 @@ private fun VisionChip(text: String, selected: Boolean, modifier: Modifier = Mod
 }
 
 @Composable
-private fun VisionMap(modifier: Modifier = Modifier, poiCategory: String? = null) {
+private fun VisionMap(modifier: Modifier = Modifier, poiCategory: String? = null, onPoiResults: (String) -> Unit = {}) {
     Box(modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF243C42))) {
-        RoutePlannerMapView(routeJson = null, poiCategory = poiCategory)
+        RoutePlannerMapView(routeJson = null, poiCategory = poiCategory, onPoiResults = onPoiResults)
     }
 }
 
@@ -3109,6 +3115,8 @@ private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
         Triple("Tyre Services", Icons.Default.TireRepair, "Tyre Services")
     )
     var selected by remember { mutableIntStateOf(1) }
+    var selectedPoiName by remember { mutableStateOf("Searching nearby…") }
+    var selectedPoiCount by remember { mutableIntStateOf(0) }
     VisionFrame {
         VisionHeader("6", "USŁUGI I POI", "Stacje paliw, serwisy, myjnie, restauracje, sklepy")
         Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(13.dp))
@@ -3133,14 +3141,20 @@ private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
                 }
             }
             Column(Modifier.weight(0.92f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                VisionMap(Modifier.weight(0.68f).fillMaxWidth(), poiCategory = listOf("parking", "fuel", "truck_services", "car_wash", "restaurant", "shop", "rest_area", "weighbridge", "tyre")[selected])
+                VisionMap(Modifier.weight(0.68f).fillMaxWidth(), poiCategory = listOf("parking", "fuel", "truck_services", "car_wash", "restaurant", "shop", "rest_area", "weighbridge", "tyre")[selected], onPoiResults = { json ->
+                    try {
+                        val array = org.json.JSONArray(json)
+                        selectedPoiCount = array.length()
+                        selectedPoiName = if (array.length() > 0) array.getJSONObject(0).optString("name").ifBlank { categories[selected].first } else "No mapped results nearby"
+                    } catch (_: Exception) { selectedPoiName = "Nearby results"; selectedPoiCount = 0 }
+                })
                 Column(Modifier.weight(0.32f).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF10191F)).padding(horizontal = 8.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(categories[selected].second, null, tint = Color(0xFFFFB33D), modifier = Modifier.size(27.dp))
                         Column(Modifier.weight(1f).padding(start = 7.dp)) {
-                            Text(if (selected == 1) "Fuel stations nearby" else categories[selected].first, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            Text("OpenStreetMap results", color = VisionMuted, fontSize = 9.sp, maxLines = 1)
+                            Text(selectedPoiName, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(if (selectedPoiCount > 0) "$selectedPoiCount nearby results · OpenStreetMap" else "Searching OpenStreetMap", color = VisionMuted, fontSize = 9.sp, maxLines = 1)
                         }
                         Text("Nearby", color = Color.White, fontSize = 10.sp)
                     }
