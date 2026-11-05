@@ -3015,10 +3015,12 @@ private fun VisionHeader(number: String, heading: String, subtitle: String) {
 private fun VisionBottomBar(selected: String, onNavigate: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().height(43.dp).background(Color(0xFF080E13)), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         listOf(Triple("Home", Icons.Default.Home, "HOME"), Triple("Map", Icons.Default.Map, "MAP"),
-            Triple("Route", Icons.Default.Route, "ROUTE PLANNER"), Triple("Services", Icons.Default.Build, "SERVICES & POI"),
-            Triple("Traffic", Icons.Default.Warning, "TRAFFIC"), Triple("More", Icons.Default.MoreHoriz, "SETTINGS")).forEach { item ->
+            Triple("Route", Icons.Default.Route, "ROUTE PLANNER"), Triple("Parking", Icons.Default.LocalParking, "TRUCK PARKING"),
+            Triple("Services", Icons.Default.Build, "SERVICES & POI"), Triple("Traffic", Icons.Default.Warning, "TRAFFIC"),
+            Triple("More", Icons.Default.MoreHoriz, "SETTINGS")).forEach { item ->
             val active = when (selected) {
-                "TRUCK PARKING", "SERVICES & POI" -> item.first == "Services"
+                "TRUCK PARKING" -> item.first == "Parking"
+                "SERVICES & POI" -> item.first == "Services"
                 "MY PLACES", "HISTORY" -> item.first == "More"
                 else -> item.third == selected
             }
@@ -3060,6 +3062,54 @@ private fun VisionMap(modifier: Modifier = Modifier, poiCategory: String? = null
 }
 
 @Composable
+private fun GooglePlacePhoto(query: String, modifier: Modifier = Modifier) {
+    val photo = produceState<Pair<androidx.compose.ui.graphics.ImageBitmap?, String>>(initialValue = null to "", query) {
+        value = null to ""
+        val key = BuildConfig.GOOGLE_MAPS_API_KEY
+        if (key.isBlank() || query.isBlank()) return@produceState
+        value = withContext(Dispatchers.IO) {
+            try {
+                val search = (URL("https://places.googleapis.com/v1/places:searchText").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 7000
+                    readTimeout = 9000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("X-Goog-Api-Key", key)
+                    setRequestProperty("X-Goog-FieldMask", "places.photos")
+                }
+                search.outputStream.use { it.write(JSONObject().put("textQuery", query).toString().toByteArray(Charsets.UTF_8)) }
+                val response = search.inputStream.bufferedReader().use { it.readText() }
+                search.disconnect()
+                val places = JSONObject(response).optJSONArray("places") ?: return@withContext null to ""
+                if (places.length() == 0) return@withContext null to ""
+                val photos = places.getJSONObject(0).optJSONArray("photos") ?: return@withContext null to ""
+                if (photos.length() == 0) return@withContext null to ""
+                val photoInfo = photos.getJSONObject(0)
+                val photoName = photoInfo.optString("name")
+                val attributionArray = photoInfo.optJSONArray("authorAttributions")
+                val attribution = if (attributionArray != null && attributionArray.length() > 0)
+                    attributionArray.getJSONObject(0).optString("displayName") else "Google"
+                val photoUrl = URL("https://places.googleapis.com/v1/$photoName/media?maxWidthPx=480&key=$key")
+                val connection = (photoUrl.openConnection() as HttpURLConnection).apply { connectTimeout = 7000; readTimeout = 9000 }
+                val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
+                connection.disconnect()
+                (bitmap?.asImageBitmap()) to attribution
+            } catch (_: Exception) { null to "" }
+        }
+    }
+    Box(modifier.background(Color(0xFF172630)), contentAlignment = Alignment.Center) {
+        val bitmap = photo.value.first
+        if (bitmap != null) {
+            Image(bitmap = bitmap, contentDescription = "Google Places photo of $query", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Text(photo.value.second, color = Color.White, fontSize = 7.sp, modifier = Modifier.align(Alignment.BottomEnd).background(Color(0x99000000)).padding(horizontal = 3.dp, vertical = 1.dp), maxLines = 1)
+        } else {
+            Text(if (BuildConfig.GOOGLE_MAPS_API_KEY.isBlank()) "GOOGLE API KEY" else "PHOTO UNAVAILABLE", color = VisionMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 private fun TruckParkingVision(onNavigate: (String) -> Unit) {
     var filter by remember { mutableStateOf("Near Me") }
     var selected by remember { mutableIntStateOf(0) }
@@ -3087,12 +3137,10 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
                         Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
                             .background(if (selected == index) Color(0xFF26343E) else Color(0x99121B22))
                             .clickable { selected = index }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(Color(0xFF172630)), contentAlignment = Alignment.Center) {
-                                Text("PHOTO", color = VisionMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                            }
+                            GooglePlacePhoto(parkName, Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)))
                             Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
                                 Text(parkName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                                Text("Real mapped location", color = Color(0xFFFFA33D), fontSize = 9.sp, maxLines = 1)
+                                Text("Google Places photo · mapped location", color = Color(0xFFFFA33D), fontSize = 9.sp, maxLines = 1)
                                 Text("${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lat"))}, ${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lon"))}", color = VisionMuted, fontSize = 8.sp, maxLines = 1)
                             }
                         }
