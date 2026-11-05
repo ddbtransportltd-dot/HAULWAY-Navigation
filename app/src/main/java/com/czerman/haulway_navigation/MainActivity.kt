@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -2567,6 +2568,25 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     var trafficError by remember { mutableStateOf<String?>(null) }
     var mapViewportBounds by remember { mutableStateOf<String?>(null) }
     val trafficScope = rememberCoroutineScope()
+    var lastTrafficMapBounds by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(selectedScope, mapViewportBounds) {
+        val requestedBounds = mapViewportBounds
+        if (selectedScope == "MAP" && requestedBounds != null && trafficSnapshot != null && requestedBounds != lastTrafficMapBounds) {
+            delay(1300)
+            if (selectedScope == "MAP" && mapViewportBounds == requestedBounds && requestedBounds != lastTrafficMapBounds && !trafficLoading) {
+                trafficLoading = true
+                trafficError = null
+                try {
+                    trafficSnapshot = fetchHaulwayTrafficIncidents(context, "MAP", requestedBounds)
+                    lastTrafficMapBounds = requestedBounds
+                } catch (error: Exception) {
+                    trafficError = error.message ?: "Traffic feed could not be refreshed for this map area."
+                } finally {
+                    trafficLoading = false
+                }
+            }
+        }
+    }
     val groups = listOf("ALL", "TRAFFIC", "INCIDENTS", "ROAD STATUS", "WEATHER", "HGV RESTRICTIONS", "CHARGES & CONTROL", "SAFETY", "TRAVEL")
     val visibleLayers = layers.mapIndexed { index, layer -> index to layer }.filter { (_, layer) ->
         (selectedGroup == "ALL" || layer.group == selectedGroup) &&
@@ -2639,6 +2659,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                                 trafficScope.launch {
                                     try {
                                         trafficSnapshot = fetchHaulwayTrafficIncidents(context, selectedScope, mapViewportBounds)
+                                        if (selectedScope == "MAP") lastTrafficMapBounds = mapViewportBounds
                                     } catch (error: Exception) {
                                         trafficError = error.message ?: "Traffic feed could not be loaded."
                                     } finally {
