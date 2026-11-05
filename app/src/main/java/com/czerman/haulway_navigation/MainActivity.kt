@@ -8,6 +8,25 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import android.os.Bundle
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import org.maplibre.android.MapLibre
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.Point
 import android.os.Looper
 import android.content.Context
 import android.content.pm.PackageManager
@@ -1234,147 +1253,396 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
     }
 }
 
-@Composable
-private fun RealNavigationMap(zoom: Int, latitude: Double?, longitude: Double?, bearing: Float?, accuracy: Float?, followRequest: Int, mapStyleRequest: Int, headingUp: Boolean, followEnabled: Boolean, tilt3D: Boolean, searchLocation: Pair<Double, Double>?) {
-    val context = LocalContext.current
-    var pageReady by remember { mutableStateOf(false) }
-    var lastSentRoute by remember { mutableStateOf<String?>(null) }
-    var lastSentZoom by remember { mutableStateOf<Int?>(null) }
-    var lastSentFollowRequest by remember { mutableStateOf<Int?>(null) }
-    var lastSentMapStyleRequest by remember { mutableStateOf<Int?>(null) }
-    val mapPrefs = remember { context.getSharedPreferences("haulway_settings_v10", Context.MODE_PRIVATE) }
-    var lastSentAppearance by remember { mutableStateOf<String?>(null) }
-    var lastSentHeadingUp by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentFollowEnabled by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentTilt3D by remember { mutableStateOf<Boolean?>(null) }
-    var lastSentSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    AndroidView(
-        modifier = Modifier.fillMaxSize().background(Color(0xFF101B24)),
-        factory = { ctx ->
-            WebView(ctx).apply {
-                setBackgroundColor(android.graphics.Color.rgb(16, 27, 36))
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.setGeolocationEnabled(true)
-                settings.loadsImagesAutomatically = true
-                settings.blockNetworkImage = false
-                settings.allowContentAccess = true
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                settings.setSupportZoom(false)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                isVerticalScrollBarEnabled = false
-                isHorizontalScrollBarEnabled = false
-                webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                        pageReady = false
-                        lastSentZoom = null
-                        lastSentRoute = null
-                        android.util.Log.i("HAULWAY_MAP", "Map page started: $url")
-                    }
-                    override fun onPageFinished(view: WebView, url: String?) {
-                        pageReady = true
-                        android.util.Log.i("HAULWAY_MAP", "Map document ready: $url")
-                        view.evaluateJavascript("(function(){return 'doc='+document.readyState+', leaflet='+typeof window.L+', map='+!!document.getElementById('map')})()") { result ->
-                            android.util.Log.i("HAULWAY_MAP", "Page diagnostic: $result")
-                            view.evaluateJavascript("(function(){var m=document.getElementById('map'),t=document.getElementById('tiles'),w=document.getElementById('tileworld');return 'viewport='+m.clientWidth+'x'+m.clientHeight+',tiles='+t.children.length+',world='+getComputedStyle(w).transform})()") { geometry ->
-                                android.util.Log.i("HAULWAY_MAP", "Render geometry: $geometry")
-                            }
-                        }
-                    }
-                    override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
-                        android.util.Log.e("HAULWAY_MAP", "Web resource error ${error.errorCode}: ${error.description} (${request.url})")
-                    }
-                    override fun onReceivedHttpError(view: WebView, request: android.webkit.WebResourceRequest, response: android.webkit.WebResourceResponse) {
-                        android.util.Log.w("HAULWAY_MAP", "HTTP ${response.statusCode} ${request.url}")
-                    }
-                    override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
-                        pageReady = false
-                        android.util.Log.e("HAULWAY_MAP", "WebView renderer exited; crashed=${detail.didCrash()}")
-                        return true
-                    }
-                }
-                webChromeClient = object : WebChromeClient() {
-                    override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
-                        val level = when (consoleMessage?.messageLevel()) {
-                            android.webkit.ConsoleMessage.MessageLevel.ERROR -> android.util.Log.ERROR
-                            android.webkit.ConsoleMessage.MessageLevel.WARNING -> android.util.Log.WARN
-                            else -> android.util.Log.INFO
-                        }
-                        android.util.Log.println(level, "HAULWAY_MAP", "JS ${consoleMessage?.message()} (${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()})")
-                        return true
-                    }
-                    override fun onGeolocationPermissionsShowPrompt(origin: String?, callback: android.webkit.GeolocationPermissions.Callback?) {
-                        val fine = androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        val coarse = androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                        callback?.invoke(origin, fine || coarse, false)
-                    }
-                }
-                android.util.Log.i("HAULWAY_MAP", "Creating WebView and loading embedded map HTML")
-                addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                    android.util.Log.i("HAULWAY_MAP", "WebView layout size: ${right-left}x${bottom-top}")
-                    if (right > left && bottom > top) {
-                        post { evaluateJavascript("window.haulwayResize && window.haulwayResize()", null) }
-                    }
-                }
-                // A synthetic .local hostname triggers DNS lookups for favicon.ico on Android WebView.
-                // Use the Android asset origin instead; all map libraries and tile URLs are absolute HTTPS URLs.
-                loadDataWithBaseURL("file:///android_asset/", NAVIGATION_MAP_HTML, "text/html", "UTF-8", null)
+private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+
+private object HaulwayGpsMarkerAnimation {
+    var latitude: Double? = null
+    var longitude: Double? = null
+    var animator: ValueAnimator? = null
+}
+
+private fun updateHaulwayNativeMapOverlays(
+    style: Style,
+    routeJson: String?,
+    latitude: Double?,
+    longitude: Double?,
+    bearing: Float?,
+    searchLocation: Pair<Double, Double>?
+) {
+    if (!routeJson.isNullOrBlank()) {
+        runCatching {
+            val input = org.json.JSONArray(routeJson)
+            val coordinates = org.json.JSONArray()
+            for (i in 0 until input.length()) {
+                val pair = input.getJSONArray(i)
+                coordinates.put(org.json.JSONArray().put(pair.getDouble(0)).put(pair.getDouble(1)))
             }
-        },
-        update = { webView ->
-            // Do not reload the WebView on every Compose recomposition: that discarded
-            // the live map, GPS marker and route overlay, leaving only the map background.
-            if (pageReady) {
-                if (lastSentZoom != zoom) {
-                    webView.evaluateJavascript("window.haulwaySetZoom && window.haulwaySetZoom($zoom)", null)
-                    lastSentZoom = zoom
+            val geometry = JSONObject().put("type", "LineString").put("coordinates", coordinates)
+            val featureJson = JSONObject()
+                .put("type", "Feature")
+                .put("geometry", geometry)
+                .put("properties", JSONObject())
+                .toString()
+            val feature = Feature.fromJson(featureJson)
+            val source = style.getSourceAs<GeoJsonSource>("haulway-route-source")
+            if (source != null) {
+                source.setGeoJson(feature)
+            } else {
+                style.addSource(GeoJsonSource("haulway-route-source", feature))
+                style.addLayer(
+                    LineLayer("haulway-route-line", "haulway-route-source").withProperties(
+                        PropertyFactory.lineColor("#00A9FF"),
+                        PropertyFactory.lineWidth(6f),
+                        PropertyFactory.lineOpacity(0.96f)
+                    )
+                )
+            }
+        }.onFailure {
+            android.util.Log.e("HAULWAY_MAPLIBRE", "Route overlay failed", it)
+        }
+    }
+
+    if (latitude != null && longitude != null) {
+        val source = style.getSourceAs<GeoJsonSource>("haulway-vehicle-source")
+        if (source == null) {
+            // GPS marker is geographically anchored and drawn above the route line.
+            val initialPoint = Feature.fromGeometry(Point.fromLngLat(longitude, latitude))
+            style.addSource(GeoJsonSource("haulway-vehicle-source", initialPoint))
+            val bitmap = android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val arrow = android.graphics.Path().apply {
+                moveTo(48f, 5f); lineTo(79f, 84f); lineTo(48f, 68f); lineTo(17f, 84f); close()
+            }
+            val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.rgb(0, 145, 235)
+                setStyle(android.graphics.Paint.Style.FILL)
+            }
+            canvas.drawPath(arrow, fill)
+            val outline = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                setStyle(android.graphics.Paint.Style.STROKE)
+                strokeWidth = 5f
+            }
+            canvas.drawPath(arrow, outline)
+            style.addImage("haulway-vehicle-arrow", bitmap)
+            style.addLayer(
+                SymbolLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
+                    PropertyFactory.iconImage("haulway-vehicle-arrow"),
+                    PropertyFactory.iconSize(0.72f),
+                    PropertyFactory.iconRotate(0f),
+                    PropertyFactory.iconRotationAlignment("viewport"),
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.iconIgnorePlacement(true)
+                )
+            )
+            HaulwayGpsMarkerAnimation.latitude = latitude
+            HaulwayGpsMarkerAnimation.longitude = longitude
+        } else {
+            val startLat = HaulwayGpsMarkerAnimation.latitude ?: latitude
+            val startLon = HaulwayGpsMarkerAnimation.longitude ?: longitude
+            HaulwayGpsMarkerAnimation.animator?.cancel()
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 900L
+                interpolator = LinearInterpolator()
+                addUpdateListener { animation ->
+                    val fraction = animation.animatedValue as Float
+                    val animatedLat = startLat + (latitude - startLat) * fraction
+                    val animatedLon = startLon + (longitude - startLon) * fraction
+                    val animatedFeature = Feature.fromGeometry(Point.fromLngLat(animatedLon, animatedLat))
+                    source.setGeoJson(animatedFeature)
+                    HaulwayGpsMarkerAnimation.latitude = animatedLat
+                    HaulwayGpsMarkerAnimation.longitude = animatedLon
                 }
-                val routeJson = RoutePlanStore.coordinatesJson
-                if (routeJson != null && routeJson != lastSentRoute) {
-                    val safeJson = JSONObject.quote(routeJson)
-                    webView.evaluateJavascript("window.haulwaySetRoute && window.haulwaySetRoute($safeJson)", null)
-                    lastSentRoute = routeJson
+            }
+            HaulwayGpsMarkerAnimation.animator = animator
+            animator.start()
+        }
+    }
+
+    if (searchLocation != null) {
+        val point = Feature.fromGeometry(Point.fromLngLat(searchLocation.second, searchLocation.first))
+        val source = style.getSourceAs<GeoJsonSource>("haulway-search-source")
+        if (source != null) {
+            source.setGeoJson(point)
+        } else {
+            style.addSource(GeoJsonSource("haulway-search-source", point))
+            style.addLayer(
+                CircleLayer("haulway-search-marker", "haulway-search-source").withProperties(
+                    PropertyFactory.circleRadius(8f),
+                    PropertyFactory.circleColor("#FF9638"),
+                    PropertyFactory.circleStrokeColor("#FFFFFF"),
+                    PropertyFactory.circleStrokeWidth(2f)
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun HaulwayNativeMapCanvas(
+    routeJson: String?,
+    mapStyleRequest: Int = 0,
+    latitude: Double? = null,
+    longitude: Double? = null,
+    bearing: Float? = null,
+    zoom: Int = 0,
+    followRequest: Int = 0,
+    followEnabled: Boolean = true,
+    tilt3D: Boolean = false,
+    searchLocation: Pair<Double, Double>? = null,
+    showGlobeControl: Boolean = false,
+    distanceToManeuver: Double? = null,
+    onUserGesture: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var globeMode by remember { mutableStateOf(true) }
+    var styleReady by remember { mutableStateOf(false) }
+    var styleError by remember { mutableStateOf<String?>(null) }
+    var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
+    var cachedStyleJson by remember { mutableStateOf<String?>(null) }
+    val latestOnUserGesture by rememberUpdatedState(onUserGesture)
+    val activeStyleUrl = if (mapStyleRequest % 2 == 0) {
+        HAULWAY_NATIVE_MAP_STYLE_URL
+    } else {
+        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+    }
+
+    val mapView = remember(context) {
+        MapLibre.getInstance(context)
+        MapView(context).also { it.onCreate(null) }
+    }
+
+    DisposableEffect(lifecycleOwner, mapView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapView.onDestroy()
+        }
+    }
+
+    LaunchedEffect(mapView) {
+        mapView.getMapAsync { map ->
+            mapLibreMap = map
+            map.uiSettings.isRotateGesturesEnabled = true
+            map.uiSettings.isCompassEnabled = false
+            map.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) latestOnUserGesture()
+            }
+            map.cameraPosition = CameraPosition.Builder()
+                .target(LatLng(53.4808, -2.2426))
+                .zoom(6.0)
+                .build()
+        }
+    }
+
+    LaunchedEffect(latitude, longitude) {
+        if (latitude != null && longitude != null && globeMode) globeMode = false
+    }
+
+    // Load the basemap once. The native globe projection automatically blends into
+    // Mercator as the camera zooms in, so changing projection must not reload the style.
+    LaunchedEffect(mapLibreMap, activeStyleUrl) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        styleReady = false
+        styleError = null
+        try {
+            val rawStyle = if (cachedStyleUrl == activeStyleUrl && cachedStyleJson != null) {
+                cachedStyleJson!!
+            } else {
+                withContext(Dispatchers.IO) {
+                val connection = URL(activeStyleUrl).openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 12000
+                connection.readTimeout = 18000
+                try {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } finally {
+                    connection.disconnect()
                 }
-                if (latitude != null && longitude != null) {
-                    val heading = bearing?.toDouble() ?: Double.NaN
-                    val accuracyMetres = accuracy?.toDouble() ?: 18.0
-                    webView.evaluateJavascript("window.haulwaySetVehicleLocation && window.haulwaySetVehicleLocation($latitude,$longitude,$heading,$accuracyMetres)", null)
+                }.also {
+                    cachedStyleUrl = activeStyleUrl
+                    cachedStyleJson = it
                 }
-                if (followRequest > 0 && lastSentFollowRequest != followRequest) {
-                    webView.evaluateJavascript("window.haulwayFollowRequest && window.haulwayFollowRequest($followRequest)", null)
-                    lastSentFollowRequest = followRequest
+            }
+
+            val parsedStyle = JSONObject(rawStyle)
+            val layers = parsedStyle.optJSONArray("layers") ?: org.json.JSONArray()
+            val cleanedLayers = org.json.JSONArray()
+            for (i in 0 until layers.length()) {
+                val layer = layers.optJSONObject(i) ?: continue
+                val id = layer.optString("id").lowercase(Locale.UK)
+                val sourceLayer = layer.optString("source-layer").lowercase(Locale.UK)
+                val type = layer.optString("type")
+                // Remove dedicated bus-stop symbols and filter bus-stop features from shared POI layers.
+                if (type == "symbol" && (id.contains("bus-stop") || id.contains("bus_stop") ||
+                    id.contains("busstop") || id.contains("bus-station") || id.contains("bus_station"))) continue
+                if (type == "symbol" && (sourceLayer.contains("poi") || id.contains("poi") || id.contains("transit"))) {
+                    val oldFilter = layer.optJSONArray("filter") ?: org.json.JSONArray().apply { put(0, "all") }
+                    fun jsonArrayOf(vararg values: Any): org.json.JSONArray =
+                        org.json.JSONArray().apply { values.forEachIndexed { index, value -> put(index, value) } }
+                    val excluded = jsonArrayOf(
+                        "any",
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "bus_stop"),
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "bus_station"),
+                        jsonArrayOf("==", jsonArrayOf("get", "class"), "bus_stop"),
+                        jsonArrayOf("==", jsonArrayOf("get", "class"), "bus_station"),
+                        jsonArrayOf("==", jsonArrayOf("get", "subclass"), "public_transport")
+                    )
+                    layer.put("filter", jsonArrayOf("all", oldFilter, jsonArrayOf("!", excluded)))
                 }
-                if (mapStyleRequest > 0 && lastSentMapStyleRequest != mapStyleRequest) {
-                    webView.evaluateJavascript("window.haulwaySetMapStyleRequest && window.haulwaySetMapStyleRequest($mapStyleRequest)", null)
-                    lastSentMapStyleRequest = mapStyleRequest
-                }
-                val appearance = mapPrefs.getString("map_mode", "Auto") ?: "Auto"
-                val selectedStyle = mapPrefs.getString("map_style", "Voyager") ?: "Voyager"
-                val appearanceKey = "$appearance|$selectedStyle"
-                if (lastSentAppearance != appearanceKey) {
-                    webView.evaluateJavascript("window.haulwayApplyAppearance && window.haulwayApplyAppearance(${JSONObject.quote(appearance)},${JSONObject.quote(selectedStyle)})", null)
-                    lastSentAppearance = appearanceKey
-                }
-                if (lastSentHeadingUp != headingUp) {
-                    webView.evaluateJavascript("window.haulwaySetHeadingUp && window.haulwaySetHeadingUp(${if (headingUp) "true" else "false"})", null)
-                    lastSentHeadingUp = headingUp
-                }
-                if (lastSentFollowEnabled != followEnabled) {
-                    webView.evaluateJavascript("window.haulwaySetFollowMode && window.haulwaySetFollowMode(${if (followEnabled) "true" else "false"})", null)
-                    lastSentFollowEnabled = followEnabled
-                }
-                if (lastSentTilt3D != tilt3D) {
-                    webView.evaluateJavascript("window.haulwaySetTilt3D && window.haulwaySetTilt3D(${if (tilt3D) "true" else "false"})", null)
-                    lastSentTilt3D = tilt3D
-                }
-                if (searchLocation != null && searchLocation != lastSentSearchLocation) {
-                    webView.evaluateJavascript("window.haulwaySearchLocation && window.haulwaySearchLocation(${searchLocation.first},${searchLocation.second})", null)
-                    lastSentSearchLocation = searchLocation
+                cleanedLayers.put(layer)
+            }
+            parsedStyle.put("layers", cleanedLayers)
+            val styleJson = parsedStyle
+                .put("projection", JSONObject().put("type", "globe"))
+                .toString()
+
+            map.setStyle(Style.Builder().fromJson(styleJson)) { loadedStyle ->
+                styleReady = true
+                updateHaulwayNativeMapOverlays(
+                    loadedStyle,
+                    routeJson,
+                    latitude,
+                    longitude,
+                    bearing,
+                    searchLocation
+                )
+                android.util.Log.i(
+                    "HAULWAY_MAPLIBRE",
+                    "Native MapLibre style ready; globe projection uses automatic Mercator transition at local zoom levels"
+                )
+            }
+        } catch (error: Exception) {
+            styleError = error.localizedMessage ?: "Could not load the native map style."
+            android.util.Log.e("HAULWAY_MAPLIBRE", "Native map style load failed", error)
+            if (!globeMode) {
+                map.setStyle(activeStyleUrl) {
+                    styleReady = true
+                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, bearing, searchLocation)
                 }
             }
         }
+    }
+
+    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, bearing, searchLocation) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        if (!styleReady) return@LaunchedEffect
+        map.getStyle { style ->
+            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, bearing, searchLocation)
+        }
+    }
+
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, tilt3D, distanceToManeuver) {
+        val map = mapLibreMap ?: return@LaunchedEffect
+        val camera = if (globeMode) {
+            CameraPosition.Builder()
+                .target(LatLng(15.0, 0.0))
+                .zoom(1.35)
+                .tilt(0.0)
+                .bearing(0.0)
+                .build()
+        } else {
+            val hasGps = latitude != null && longitude != null
+            val currentCamera = map.cameraPosition
+            val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
+            val baseZoom = if (hasGps && followEnabled) (13.2 + (zoom - 4)) else currentCamera.zoom
+            val maneuverZoom = when {
+                distanceToManeuver == null -> 0.0
+                distanceToManeuver < 120.0 -> 2.0
+                distanceToManeuver < 350.0 -> 1.5
+                distanceToManeuver < 800.0 -> 0.8
+                else -> 0.0
+            }
+            val targetZoom = (baseZoom + maneuverZoom).coerceAtMost(16.0)
+            CameraPosition.Builder()
+                .target(target)
+                .zoom(targetZoom)
+                .tilt(if (followEnabled && tilt3D && hasGps) 48.0 else if (!followEnabled) currentCamera.tilt else 0.0)
+                .bearing(if (hasGps && followEnabled) (bearing ?: 0f).toDouble() else if (!followEnabled) currentCamera.bearing else 0.0)
+                .build()
+        }
+        // Keep the globe-to-live-position camera flight comfortably below five seconds.
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 1_400)
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF101B24))) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { mapView }
+        )
+        if (showGlobeControl && false) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
+                    .clickable { globeMode = !globeMode },
+                shape = RoundedCornerShape(9.dp),
+                color = Color(0xE9161D23),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8)),
+                shadowElevation = 5.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.Public, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+                    Text(if (globeMode) "MAP" else "GLOBE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (styleError != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
+                color = Color(0xDD18232D),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    styleError!!,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    maxLines = 2
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RealNavigationMap(
+    zoom: Int,
+    latitude: Double?,
+    longitude: Double?,
+    bearing: Float?,
+    accuracy: Float?,
+    followRequest: Int,
+    mapStyleRequest: Int,
+    headingUp: Boolean,
+    followEnabled: Boolean,
+    tilt3D: Boolean,
+    searchLocation: Pair<Double, Double>?
+) {
+    HaulwayNativeMapCanvas(
+        routeJson = RoutePlanStore.coordinatesJson,
+        mapStyleRequest = mapStyleRequest,
+        latitude = latitude,
+        longitude = longitude,
+        bearing = bearing,
+        zoom = zoom,
+        followRequest = followRequest,
+        followEnabled = followEnabled,
+        tilt3D = tilt3D,
+        searchLocation = searchLocation,
+        showGlobeControl = false
     )
 }
 
