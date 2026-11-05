@@ -3,7 +3,7 @@ name: HAULWAY Android Build
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, vision-21-visual-screens-5-6-8-9]
 
 permissions:
   contents: read
