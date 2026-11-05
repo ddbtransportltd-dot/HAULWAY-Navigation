@@ -1462,6 +1462,7 @@ function poiQueryFor(category,bounds){
  const filters={
   fuel:'node[amenity=fuel]('+box+');way[amenity=fuel]('+box+');',
   parking:'node[amenity=parking]('+box+');way[amenity=parking]('+box+');node[highway=services]('+box+');way[highway=services]('+box+');',
+  truck_parking:'node[amenity=parking][hgv]('+box+');way[amenity=parking][hgv]('+box+');node[amenity=parking][parking=truck]('+box+');way[amenity=parking][parking=truck]('+box+');node[highway=services]('+box+');way[highway=services]('+box+');
   truck_services:'node[shop~"^(truck|car_repair)$]('+box+');way[shop~"^(truck|car_repair)$]('+box+');node[amenity=vehicle_inspection]('+box+');',
   car_wash:'node[amenity=car_wash]('+box+');way[amenity=car_wash]('+box+');',
   restaurant:'node[amenity~"^(restaurant|fast_food|cafe)$]('+box+');way[amenity~"^(restaurant|fast_food|cafe)$]('+box+');',
@@ -1474,7 +1475,7 @@ function poiQueryFor(category,bounds){
 }
 function poiKind(category,tags){
  if(category==='fuel')return 'fuel';
- if(category==='parking'||category==='rest_area')return 'parking';
+ if(category==='parking'||category==='truck_parking'||category==='rest_area')return 'parking';
  if(category==='restaurant')return 'restaurant';
  if(category==='shop')return 'shop';
  return 'service';
@@ -1532,7 +1533,7 @@ function fetchPoiCategory(category){
     if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;
     const key=lat.toFixed(5)+':'+lon.toFixed(5);if(seen.has(key))return null;seen.add(key);
     const kind=poiKind(category,t),brand=(t.brand||t.operator||'').toLowerCase(),name=t.name||t.brand||t.operator||'';
-    const icon=category==='fuel'?(brand.includes('shell')?'S':brand.includes('bp')?'✿':brand.includes('esso')?'E':'F'):category==='parking'?'P':category==='restaurant'?'餐':category==='shop'?'S':category==='rest_area'?'R':category==='weighbridge'?'W':category==='tyre'?'T':'🔧';
+    const icon=category==='fuel'?(brand.includes('shell')?'S':brand.includes('bp')?'✿':brand.includes('esso')?'E':'F'):(category==='parking'||category==='truck_parking')?'P':category==='restaurant'?'餐':category==='shop'?'S':category==='rest_area'?'R':category==='weighbridge'?'W':category==='tyre'?'T':'🔧';
     const brandSlug=brand.includes('shell')?'shell':brand.includes('bp')?'bp':brand.includes('esso')?'esso':'';
     return {lat,lon,kind,name,icon,brand:brandSlug};
    }).filter(Boolean).slice(0,80);
@@ -3084,9 +3085,18 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
                     Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
                         .background(if (selected == index) Color(0xFF26343E) else Color(0x99121B22))
                         .clickable { selected = index }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(Color(0xFF34434D)), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.LocalParking, null, tint = Color(0xFFBBD7E8), modifier = Modifier.size(30.dp))
-                        }
+                        Image(
+                            painter = painterResource(id = when (index % 5) {
+                                0 -> R.drawable.haulway_truck_3d_1
+                                1 -> R.drawable.haulway_truck_3d_2
+                                2 -> R.drawable.haulway_truck_3d_3
+                                3 -> R.drawable.haulway_truck_3d_4
+                                else -> R.drawable.haulway_truck_3d_5
+                            }),
+                            contentDescription = "Truck parking preview",
+                            modifier = Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop
+                        )
                         Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
                             Text(park.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             Text(park.third, color = Color(0xFFFFA33D), fontSize = 10.sp, maxLines = 1)
@@ -3103,7 +3113,7 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
                     if (index != parks.lastIndex) Spacer(Modifier.height(3.dp))
                 }
             }
-            VisionMap(Modifier.weight(1f).fillMaxHeight(), poiCategory = "parking")
+            VisionMap(Modifier.weight(1f).fillMaxHeight(), poiCategory = "truck_parking")
         }
         Spacer(Modifier.height(5.dp))
         VisionBottomBar("TRUCK PARKING", onNavigate)
@@ -3298,11 +3308,11 @@ private fun savePlaces(prefs: android.content.SharedPreferences, places: List<Pa
 private fun HistoryStatisticsVision(onNavigate: (String) -> Unit) {
     var tab by remember { mutableStateOf("Recent Routes") }
     val rows = listOf(
-        Triple("Manchester  →  Hull", "189 mi  ·  3 h 38 min", "28 Oct"),
-        Triple("Liverpool  →  Leeds", "152 mi  ·  2 h 56 min", "23 Oct"),
-        Triple("Skelmersdale  →  Doncaster", "134 mi  ·  2 h 41 min", "26 Oct"),
-        Triple("Dukinfield  →  Birmingham", "98 mi  ·  1 h 59 min", "25 Oct"),
-        Triple("Manchester  →  Liverpool", "36 mi  ·  1 h 02 min", "22 Oct")
+        Triple("Manchester  →  Hull", "189 mi  ·  3 h 38 min", "26 Oct" to "28 Oct 2026"),
+        Triple("Liverpool  →  Leeds", "152 mi  ·  2 h 56 min", "25 Oct" to "27 Oct 2026"),
+        Triple("Skelmersdale  →  Doncaster", "134 mi  ·  2 h 41 min", "26 Oct" to "26 Oct 2026"),
+        Triple("Dukinfield  →  Birmingham", "98 mi  ·  1 h 59 min", "25 Oct" to "25 Oct 2026"),
+        Triple("Manchester  →  Liverpool", "36 mi  ·  1 h 02 min", "22 Oct" to "24 Oct 2026")
     )
     VisionFrame {
         VisionHeader("9", "HISTORIA I STATYSTYKI", "Ostatnie trasy, dystans, czas, zużycie")
@@ -3318,15 +3328,15 @@ private fun HistoryStatisticsVision(onNavigate: (String) -> Unit) {
                         .background(Color(0xFF111A20)).padding(horizontal = 9.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(23.dp).clip(CircleShape).background(Color(0xFF3A9A67)), contentAlignment = Alignment.Center) {
-                            Text((index + 2).toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(listOf("2", "8", "3", "2", "8").getOrElse(index) { "2" }, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                         Column(Modifier.weight(1f).padding(start = 9.dp)) {
                             Text(route.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(route.second, color = VisionMuted, fontSize = 10.sp)
                         }
-                        Text(route.third, color = Color.White, fontSize = 10.sp)
+                        Text(route.third.first, color = Color.White, fontSize = 10.sp, modifier = Modifier.width(48.dp), textAlign = TextAlign.End)
                         Spacer(Modifier.width(10.dp))
-                        Text("28 Oct 2026", color = VisionMuted, fontSize = 9.sp)
+                        Text(route.third.second, color = VisionMuted, fontSize = 9.sp, modifier = Modifier.width(78.dp), textAlign = TextAlign.End)
                     }
                     Spacer(Modifier.height(3.dp))
                 }
