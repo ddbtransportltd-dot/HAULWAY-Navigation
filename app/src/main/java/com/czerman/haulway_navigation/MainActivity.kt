@@ -1463,7 +1463,7 @@ function poiQueryFor(category,bounds){
  const filters={
   fuel:'node[amenity=fuel]('+box+');way[amenity=fuel]('+box+');',
   parking:'node[amenity=parking]('+box+');way[amenity=parking]('+box+');node[highway=services]('+box+');way[highway=services]('+box+');',
-  truck_parking:'node[amenity=parking][hgv]('+box+');way[amenity=parking][hgv]('+box+');node[amenity=parking][parking=truck]('+box+');way[amenity=parking][parking=truck]('+box+');node[highway=services]('+box+');way[highway=services]('+box+');
+  truck_parking:'node[amenity=parking][hgv]('+box+');way[amenity=parking][hgv]('+box+');node[amenity=parking][parking=truck]('+box+');way[amenity=parking][parking=truck]('+box+');node[highway=services]('+box+');way[highway=services]('+box+');',
   truck_services:'node[shop~"^(truck|car_repair)$]('+box+');way[shop~"^(truck|car_repair)$]('+box+');node[amenity=vehicle_inspection]('+box+');',
   car_wash:'node[amenity=car_wash]('+box+');way[amenity=car_wash]('+box+');',
   restaurant:'node[amenity~"^(restaurant|fast_food|cafe)$]('+box+');way[amenity~"^(restaurant|fast_food|cafe)$]('+box+');',
