@@ -2870,6 +2870,334 @@ private fun TrafficBottomNavigation(
     }
 }
 
+
+private val VisionBg = Color(0xFF071018)
+private val VisionPanel = Color(0xD91A252D)
+private val VisionLine = Color(0xFF43515C)
+private val VisionBlue = Color(0xFF087FD2)
+private val VisionMuted = Color(0xFFB7C4CE)
+
+@Composable
+private fun VisionHeader(number: String, heading: String, subtitle: String) {
+    Column(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 3.dp, bottom = 8.dp)) {
+        Text("$number.  $heading", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(subtitle, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(start = 20.dp, top = 2.dp), maxLines = 1)
+    }
+}
+
+@Composable
+private fun VisionBottomBar(selected: String, onNavigate: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().height(43.dp).background(Color(0xFF080E13)), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        listOf(Triple("Home", Icons.Default.Home, "HOME"), Triple("Map", Icons.Default.Map, "MAP"),
+            Triple("Route", Icons.Default.Route, "ROUTE PLANNER"), Triple("Services", Icons.Default.Build, "SERVICES & POI"),
+            Triple("Traffic", Icons.Default.Warning, "TRAFFIC"), Triple("More", Icons.Default.MoreHoriz, "SETTINGS")).forEach { item ->
+            val active = when (selected) {
+                "TRUCK PARKING", "SERVICES & POI" -> item.first == "Services"
+                "MY PLACES", "HISTORY" -> item.first == "More"
+                else -> item.third == selected
+            }
+            Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(5.dp))
+                .background(if (active) VisionBlue else Color(0xFF151E25))
+                .clickable { onNavigate(item.third) }.padding(vertical = 3.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(item.second, null, tint = Color.White, modifier = Modifier.size(17.dp))
+                Text(item.first, color = Color.White, fontSize = 9.sp, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun VisionFrame(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxSize().background(VisionBg).padding(horizontal = 5.dp, vertical = 4.dp)) { content() }
+}
+
+@Composable
+private fun VisionPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.clip(RoundedCornerShape(13.dp)).background(VisionPanel)
+        .padding(8.dp), content = content)
+}
+
+@Composable
+private fun VisionChip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(modifier.clip(RoundedCornerShape(6.dp)).background(if (selected) Color(0xFF075A99) else Color(0xFF101920))
+        .clickable { onClick() }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = Color.White, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun VisionMap(modifier: Modifier = Modifier) {
+    Box(modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF243C42))) {
+        RoutePlannerMapView(routeJson = null)
+    }
+}
+
+@Composable
+private fun TruckParkingVision(onNavigate: (String) -> Unit) {
+    var filter by remember { mutableStateOf("Near Me") }
+    var selected by remember { mutableIntStateOf(0) }
+    val parks = listOf(
+        Triple("Truck Park M62", "2.1 mi", "★★★★★  ·  WC  ·  Wi-Fi  ·  Food"),
+        Triple("Moto Hospitality", "12 mi", "★★★★☆  ·  WC  ·  Showers  ·  Fuel"),
+        Triple("Rotherham Truck Stop", "18 mi", "★★★★☆  ·  WC  ·  Showers"),
+        Triple("Doncaster Services", "25 mi", "★★★☆☆  ·  WC  ·  Food  ·  Fuel")
+    )
+    VisionFrame {
+        VisionHeader("5", "PARKINGI DLA CIĘŻARÓWEK", "Wyszukiwanie, filtry, szczegóły i nawigacja")
+        Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFF0B1218)).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            VisionPanel(Modifier.weight(1.55f).fillMaxHeight()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Icon(Icons.Default.Search, null, tint = Color.White, modifier = Modifier.size(19.dp))
+                    listOf("Near Me", "Along Route", "At Destination").forEach { tab ->
+                        VisionChip(tab, filter == tab, Modifier.weight(1f)) { filter = tab }
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+                parks.forEachIndexed { index, park ->
+                    Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
+                        .background(if (selected == index) Color(0xFF26343E) else Color(0x99121B22))
+                        .clickable { selected = index }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(Color(0xFF34434D)), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.LocalParking, null, tint = Color(0xFFBBD7E8), modifier = Modifier.size(30.dp))
+                        }
+                        Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
+                            Text(park.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            Text(park.third, color = Color(0xFFFFA33D), fontSize = 10.sp, maxLines = 1)
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf("P", "WC", "W", "餐").forEach { tag ->
+                                    Box(Modifier.clip(RoundedCornerShape(3.dp)).background(Color(0xFF087CC5)).padding(horizontal = 4.dp, vertical = 1.dp)) {
+                                        Text(tag, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                        Text(park.second, color = Color.White, fontSize = 11.sp)
+                    }
+                    if (index != parks.lastIndex) Spacer(Modifier.height(3.dp))
+                }
+            }
+            VisionMap(Modifier.weight(1f).fillMaxHeight())
+        }
+        Spacer(Modifier.height(5.dp))
+        VisionBottomBar("TRUCK PARKING", onNavigate)
+    }
+}
+
+@Composable
+private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
+    val categories = listOf(
+        Triple("Truck Parking", Icons.Default.LocalParking, "TRUCK PARKING"),
+        Triple("Fuel Stations", Icons.Default.LocalGasStation, "Fuel Stations"),
+        Triple("Truck Services", Icons.Default.LocalShipping, "Truck Services"),
+        Triple("Truck Wash", Icons.Default.LocalCarWash, "Truck Wash"),
+        Triple("Restaurants", Icons.Default.Restaurant, "Restaurants"),
+        Triple("Shops", Icons.Default.ShoppingBag, "Shops"),
+        Triple("Rest Areas", Icons.Default.Bed, "Rest Areas"),
+        Triple("Weighbridges", Icons.Default.Scale, "Weighbridges"),
+        Triple("Tyre Services", Icons.Default.TireRepair, "Tyre Services")
+    )
+    var selected by remember { mutableIntStateOf(1) }
+    VisionFrame {
+        VisionHeader("6", "USŁUGI I POI", "Stacje paliw, serwisy, myjnie, restauracje, sklepy")
+        Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFF0B1218)).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            VisionPanel(Modifier.weight(1.15f).fillMaxHeight()) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    categories.chunked(3).forEach { row ->
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            row.forEach { item ->
+                                val index = categories.indexOf(item)
+                                Column(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+                                    .background(if (selected == index) Color(0xFF075A99) else Color(0xFF121B22))
+                                    .clickable { selected = index }.padding(4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                    Icon(item.second, null, tint = Color.White, modifier = Modifier.size(29.dp))
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(item.first, color = Color.White, fontSize = 10.sp, textAlign = TextAlign.Center, maxLines = 2)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                VisionMap(Modifier.weight(1f).fillMaxWidth())
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF17232B)).padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(categories[selected].second, null, tint = Color(0xFFFFB33D), modifier = Modifier.size(29.dp))
+                    Column(Modifier.weight(1f).padding(start = 7.dp)) {
+                        Text(if (selected == 1) "Shell" else categories[selected].first, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Nearby results", color = VisionMuted, fontSize = 10.sp)
+                    }
+                    Text("1.4 mi", color = Color.White, fontSize = 11.sp)
+                    Spacer(Modifier.width(6.dp))
+                    VisionChip("Navigate", true) { onNavigate("MAP") }
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        VisionBottomBar("SERVICES & POI", onNavigate)
+    }
+}
+
+@Composable
+private fun SavedPlacesVision(onNavigate: (String) -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("haulway_saved_places", Context.MODE_PRIVATE) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var selected by remember { mutableIntStateOf(0) }
+    var showAdd by remember { mutableStateOf(false) }
+    var placeName by remember { mutableStateOf("") }
+    var placeAddress by remember { mutableStateOf("") }
+    val places = remember(refresh) {
+        val raw = prefs.getString("items", null)
+        if (raw.isNullOrBlank()) listOf("Home" to "Dukinfield, Manchester", "Work" to "Skelmersdale",
+            "Favourite 1" to "Truck Stop M62", "Favourite 2" to "Port of Liverpool")
+        else try {
+            val a = org.json.JSONArray(raw)
+            (0 until a.length()).map { val o = a.getJSONObject(it); o.getString("name") to o.getString("address") }
+        } catch (_: Exception) { emptyList() }
+    }
+    VisionFrame {
+        VisionHeader("8", "ZAPISANE MIEJSCA", "Dom, praca, ulubione lokalizacje, import/eksport")
+        Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFF0B1218)).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            VisionPanel(Modifier.weight(0.9f).fillMaxHeight()) {
+                places.forEachIndexed { index, place ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                        .background(if (selected == index) Color(0xFF075A99) else Color(0xFF111A20))
+                        .clickable { selected = index }.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(when(index) { 0 -> Icons.Default.Home; 1 -> Icons.Default.Work; else -> Icons.Default.Place },
+                            null, tint = if (index > 1) Color(0xFFFFA13A) else Color.White, modifier = Modifier.size(20.dp))
+                        Column(Modifier.padding(start = 8.dp)) {
+                            Text(place.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(place.second, color = VisionMuted, fontSize = 9.sp, maxLines = 1)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                VisionChip("+  Add Place", false, Modifier.fillMaxWidth()) { showAdd = true }
+            }
+            Column(Modifier.weight(1.1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                VisionMap(Modifier.weight(0.8f).fillMaxWidth())
+                VisionPanel(Modifier.weight(1f).fillMaxWidth()) {
+                    val current = places.getOrNull(selected)
+                    if (current != null) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Home, null, tint = Color.White, modifier = Modifier.size(25.dp))
+                            Column(Modifier.padding(start = 9.dp)) {
+                                Text(current.first, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(current.second, color = VisionMuted, fontSize = 10.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            VisionChip("Navigate", true, Modifier.weight(1f)) { onNavigate("MAP") }
+                            VisionChip("Edit", false, Modifier.weight(1f)) { showAdd = true; placeName = current.first; placeAddress = current.second }
+                            VisionChip("Delete", false, Modifier.weight(1f)) {
+                                val updated = places.toMutableList().also { if (selected in it.indices) it.removeAt(selected) }
+                                savePlaces(prefs, updated); selected = (selected - 1).coerceAtLeast(0); refresh++
+                            }
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        VisionChip("Import", false, Modifier.weight(1f)) { Toast.makeText(context, "Import file support will be connected", Toast.LENGTH_SHORT).show() }
+                        VisionChip("Export", false, Modifier.weight(1f)) {
+                            val json = org.json.JSONArray().apply { places.forEach { put(org.json.JSONObject().put("name",it.first).put("address",it.second)) } }.toString()
+                            android.content.ClipData.newPlainText("HAULWAY saved places", json).also { (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(it) }
+                            Toast.makeText(context, "Saved places copied as JSON", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+        if (showAdd) {
+            Dialog(onDismissRequest = { showAdd = false }) {
+                VisionPanel(Modifier.fillMaxWidth()) {
+                    Text("SAVE PLACE", color = Color.White, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(placeName, { placeName = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(placeAddress, { placeAddress = it }, label = { Text("Address") }, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        VisionChip("Cancel", false, Modifier.weight(1f)) { showAdd = false }
+                        VisionChip("Save", true, Modifier.weight(1f)) {
+                            if (placeName.isNotBlank() && placeAddress.isNotBlank()) {
+                                val updated = places.toMutableList()
+                                if (selected in updated.indices && places.getOrNull(selected)?.first == placeName) updated[selected] = placeName to placeAddress
+                                else updated.add(placeName to placeAddress)
+                                savePlaces(prefs, updated); refresh++; showAdd = false; placeName = ""; placeAddress = ""
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        VisionBottomBar("MY PLACES", onNavigate)
+    }
+}
+
+private fun savePlaces(prefs: android.content.SharedPreferences, places: List<Pair<String, String>>) {
+    val json = org.json.JSONArray().apply { places.forEach { put(org.json.JSONObject().put("name", it.first).put("address", it.second)) } }
+    prefs.edit().putString("items", json.toString()).apply()
+}
+
+@Composable
+private fun HistoryStatisticsVision(onNavigate: (String) -> Unit) {
+    var tab by remember { mutableStateOf("Recent Routes") }
+    val rows = listOf(
+        Triple("Manchester  →  Hull", "189 mi  ·  3 h 38 min", "28 Oct"),
+        Triple("Liverpool  →  Leeds", "152 mi  ·  2 h 56 min", "23 Oct"),
+        Triple("Skelmersdale  →  Doncaster", "134 mi  ·  2 h 41 min", "26 Oct"),
+        Triple("Dukinfield  →  Birmingham", "98 mi  ·  1 h 59 min", "25 Oct"),
+        Triple("Manchester  →  Liverpool", "36 mi  ·  1 h 02 min", "22 Oct")
+    )
+    VisionFrame {
+        VisionHeader("9", "HISTORIA I STATYSTYKI", "Ostatnie trasy, dystans, czas, zużycie")
+        VisionPanel(Modifier.weight(1f).fillMaxWidth()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                VisionChip("Recent Routes", tab == "Recent Routes", Modifier.weight(1f)) { tab = "Recent Routes" }
+                VisionChip("Statistics", tab == "Statistics", Modifier.weight(1f)) { tab = "Statistics" }
+            }
+            Spacer(Modifier.height(7.dp))
+            if (tab == "Recent Routes") {
+                rows.forEachIndexed { index, route ->
+                    Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF111A20)).padding(horizontal = 9.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(23.dp).clip(CircleShape).background(Color(0xFF3A9A67)), contentAlignment = Alignment.Center) {
+                            Text((index + 2).toString(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                            Text(route.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(route.second, color = VisionMuted, fontSize = 10.sp)
+                        }
+                        Text(route.third, color = Color.White, fontSize = 10.sp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("28 Oct 2026", color = VisionMuted, fontSize = 9.sp)
+                    }
+                    Spacer(Modifier.height(3.dp))
+                }
+            } else {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Total distance" to "609 mi", "Driving time" to "12 h 16 min", "Journeys completed" to "5", "Average journey" to "121.8 mi").forEach { stat ->
+                        Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(7.dp)).background(Color(0xFF111A20)).padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(stat.first, color = VisionMuted, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            Text(stat.second, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        VisionBottomBar("HISTORY", onNavigate)
+    }
+}
+
 @Composable
 private fun HaulwaySectionScreen(
     section: String,
@@ -2909,6 +3237,12 @@ private fun HaulwaySectionScreen(
     if (section == "360 STREET VIEW") {
         HaulwayStreetImageryScreen(onBack = onBack)
         return
+    }
+    when (section) {
+        "TRUCK PARKING" -> { TruckParkingVision(onNavigate); return }
+        "SERVICES & POI" -> { ServicesPoiVision(onNavigate); return }
+        "MY PLACES" -> { SavedPlacesVision(onNavigate); return }
+        "HISTORY" -> { HistoryStatisticsVision(onNavigate); return }
     }
     if (section == "TRAFFIC") {
         Column(Modifier.fillMaxSize().background(bg)) {
