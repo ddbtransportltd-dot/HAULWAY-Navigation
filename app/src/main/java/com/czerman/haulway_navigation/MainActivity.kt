@@ -1539,7 +1539,7 @@ function fetchPoiCategory(category){
     return {lat,lon,kind,name,icon,brand:brandSlug};
    }).filter(Boolean).slice(0,80);
    drawPoiMarkers();status.style.display='none';
-   try{if(window.HaulwayViewportBridge&&window.HaulwayViewportBridge.onPoiResults)window.HaulwayPoiBridge.onPoiResults(JSON.stringify(poiFeatures));}catch(e){console.warn('POI result bridge unavailable: '+e);}
+   try{if(window.HaulwayViewportBridge&&window.HaulwayViewportBridge.onPoiResults)window.HaulwayViewportBridge.onPoiResults(JSON.stringify(poiFeatures));}catch(e){console.warn('POI result bridge unavailable: '+e);}
    fetchM62Overlay(bounds,id);
    console.log('HAULWAY POI '+category+': '+poiFeatures.length+' real OpenStreetMap features');
   }).catch(err=>{
