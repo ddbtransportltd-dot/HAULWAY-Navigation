@@ -3153,7 +3153,7 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
                             Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
                                 Text(parkName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
                                 Text("Google Places photo · mapped location", color = Color(0xFFFFA33D), fontSize = 9.sp, maxLines = 1)
-                                Text("${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lat"))}, ${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lon"))}", color = VisionMuted, fontSize = 8.sp, maxLines = 1)
+                                Text("${String.format(java.util.Locale.UK, "%.5f", park.optDouble("lat"))}, ${String.format(java.util.Locale.UK, "%.5f", park.optDouble("lon"))}", color = VisionMuted, fontSize = 8.sp, maxLines = 1)
                             }
                         }
                         if (index != parks.lastIndex) Spacer(Modifier.height(3.dp))
