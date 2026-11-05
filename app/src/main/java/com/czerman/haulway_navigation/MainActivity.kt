@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -2398,7 +2399,18 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
                                 loadType = "General"; maxSpeed = if(type == "VAN" || type == "BUS") "70" else "56"
                                 prefs.edit().putString("vehicleType", vehicleType).putString("trailerType", trailerType).putString("grossWeight", grossWeight).putString("axleWeight", axleWeight).putString("maxSpeed", maxSpeed).putString("loadType", loadType).apply()
                             }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(when(type) { "ARTIC", "WAG & DRAG", "RIGID" -> Icons.Default.LocalShipping; "VAN" -> Icons.Default.DirectionsCar; else -> Icons.Default.DirectionsBus }, null, tint = if(selectedProfile==index) Color(0xFFBDE8FF) else Color(0xFF9EABB5), modifier = Modifier.size(23.dp))
+                                Image(
+                                    painter = painterResource(id = when(type) {
+                                        "ARTIC" -> R.drawable.haulway_truck_3d_1
+                                        "RIGID" -> R.drawable.haulway_truck_3d_2
+                                        "VAN" -> R.drawable.haulway_truck_3d_3
+                                        "WAG & DRAG" -> R.drawable.haulway_truck_3d_4
+                                        else -> R.drawable.haulway_truck_3d_5
+                                    }),
+                                    contentDescription = "$type vehicle photo preview",
+                                    modifier = Modifier.size(width = 54.dp, height = 42.dp).clip(RoundedCornerShape(4.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
                                 Spacer(Modifier.width(6.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text("TRUCK $typeIndex", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
