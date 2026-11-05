@@ -3063,14 +3063,10 @@ private fun VisionMap(modifier: Modifier = Modifier, poiCategory: String? = null
 private fun TruckParkingVision(onNavigate: (String) -> Unit) {
     var filter by remember { mutableStateOf("Near Me") }
     var selected by remember { mutableIntStateOf(0) }
-    val parks = listOf(
-        Triple("Truck Park M62", "2.1 mi", "★★★★★  ·  WC  ·  Wi-Fi  ·  Food"),
-        Triple("Moto Hospitality", "12 mi", "★★★★☆  ·  WC  ·  Showers  ·  Fuel"),
-        Triple("Rotherham Truck Stop", "18 mi", "★★★★☆  ·  WC  ·  Showers"),
-        Triple("Doncaster Services", "25 mi", "★★★☆☆  ·  WC  ·  Food  ·  Fuel")
-    )
+    val parks = remember { mutableStateListOf<JSONObject>() }
+    var loading by remember { mutableStateOf(true) }
     VisionFrame {
-        VisionHeader("5", "PARKINGI DLA CIĘŻARÓWEK", "Wyszukiwanie, filtry, szczegóły i nawigacja")
+        VisionHeader("5", "PARKINGI DLA CIĘŻARÓWEK", "Wyszukiwanie, filtry i rzeczywiste lokalizacje na mapie")
         Row(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(13.dp))
             .background(Color(0xFF0B1218)).padding(7.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             VisionPanel(Modifier.weight(1.55f).fillMaxHeight()) {
@@ -3081,39 +3077,41 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(5.dp))
-                parks.forEachIndexed { index, park ->
-                    Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
-                        .background(if (selected == index) Color(0xFF26343E) else Color(0x99121B22))
-                        .clickable { selected = index }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(id = when (index % 5) {
-                                0 -> R.drawable.haulway_truck_3d_1
-                                1 -> R.drawable.haulway_truck_3d_2
-                                2 -> R.drawable.haulway_truck_3d_3
-                                3 -> R.drawable.haulway_truck_3d_4
-                                else -> R.drawable.haulway_truck_3d_5
-                            }),
-                            contentDescription = "Truck parking preview",
-                            modifier = Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
-                            Text(park.first, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            Text(park.third, color = Color(0xFFFFA33D), fontSize = 10.sp, maxLines = 1)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf("P", "WC", "W", "餐").forEach { tag ->
-                                    Box(Modifier.clip(RoundedCornerShape(3.dp)).background(Color(0xFF087CC5)).padding(horizontal = 4.dp, vertical = 1.dp)) {
-                                        Text(tag, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                if (parks.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(if (loading) "Searching real truck parking locations…" else "No truck parking locations found in this map area", color = VisionMuted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    }
+                } else {
+                    parks.forEachIndexed { index, park ->
+                        val parkName = park.optString("name").ifBlank { "Unnamed truck parking" }
+                        Row(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(6.dp))
+                            .background(if (selected == index) Color(0xFF26343E) else Color(0x99121B22))
+                            .clickable { selected = index }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.width(66.dp).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(Color(0xFF172630)), contentAlignment = Alignment.Center) {
+                                Text("PHOTO", color = VisionMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Column(Modifier.weight(1f).padding(start = 7.dp), verticalArrangement = Arrangement.Center) {
+                                Text(parkName, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                                Text("Real mapped location", color = Color(0xFFFFA33D), fontSize = 9.sp, maxLines = 1)
+                                Text("${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lat"))}, ${'$'}{String.format(java.util.Locale.UK, "%.5f", park.optDouble("lon"))}", color = VisionMuted, fontSize = 8.sp, maxLines = 1)
                             }
                         }
-                        Text(park.second, color = Color.White, fontSize = 11.sp)
+                        if (index != parks.lastIndex) Spacer(Modifier.height(3.dp))
                     }
-                    if (index != parks.lastIndex) Spacer(Modifier.height(3.dp))
                 }
             }
-            VisionMap(Modifier.weight(1f).fillMaxHeight(), poiCategory = "truck_parking")
+            VisionMap(Modifier.weight(1f).fillMaxHeight(), poiCategory = "truck_parking", onPoiResults = { json ->
+                try {
+                    val array = org.json.JSONArray(json)
+                    parks.clear()
+                    for (i in 0 until array.length()) {
+                        val item = array.getJSONObject(i)
+                        if (item.optString("kind") == "parking") parks.add(item)
+                    }
+                    loading = false
+                    if (selected >= parks.size) selected = 0
+                } catch (_: Exception) { loading = false }
+            })
         }
         Spacer(Modifier.height(5.dp))
         VisionBottomBar("TRUCK PARKING", onNavigate)
@@ -3123,7 +3121,6 @@ private fun TruckParkingVision(onNavigate: (String) -> Unit) {
 @Composable
 private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
     val categories = listOf(
-        Triple("Truck Parking", Icons.Default.LocalParking, "TRUCK PARKING"),
         Triple("Fuel Stations", Icons.Default.LocalGasStation, "Fuel Stations"),
         Triple("Truck Services", Icons.Default.LocalShipping, "Truck Services"),
         Triple("Truck Wash", Icons.Default.LocalCarWash, "Truck Wash"),
@@ -3133,7 +3130,7 @@ private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
         Triple("Weighbridges", Icons.Default.Scale, "Weighbridges"),
         Triple("Tyre Services", Icons.Default.TireRepair, "Tyre Services")
     )
-    var selected by remember { mutableIntStateOf(1) }
+    var selected by remember { mutableIntStateOf(0) }
     var selectedPoiName by remember { mutableStateOf("Searching nearby…") }
     var selectedPoiCount by remember { mutableIntStateOf(0) }
     VisionFrame {
@@ -3160,7 +3157,7 @@ private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
                 }
             }
             Column(Modifier.weight(0.92f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                VisionMap(Modifier.weight(0.68f).fillMaxWidth(), poiCategory = listOf("parking", "fuel", "truck_services", "car_wash", "restaurant", "shop", "rest_area", "weighbridge", "tyre")[selected], onPoiResults = { json ->
+                VisionMap(Modifier.weight(0.68f).fillMaxWidth(), poiCategory = listOf("fuel", "truck_services", "car_wash", "restaurant", "shop", "rest_area", "weighbridge", "tyre")[selected], onPoiResults = { json ->
                     try {
                         val array = org.json.JSONArray(json)
                         selectedPoiCount = array.length()
@@ -3179,13 +3176,12 @@ private fun ServicesPoiVision(onNavigate: (String) -> Unit) {
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         val facilities = when (selected) {
-                            1 -> listOf(Icons.Default.LocalGasStation to "Fuel", Icons.Default.Wc to "WC", Icons.Default.LocalParking to "P", Icons.Default.Shower to "Shower")
-                            0 -> listOf(Icons.Default.LocalParking to "P", Icons.Default.Wc to "WC", Icons.Default.Shower to "Shower", Icons.Default.Restaurant to "Food")
-                            3 -> listOf(Icons.Default.LocalCarWash to "Wash")
-                            4 -> listOf(Icons.Default.Restaurant to "Food")
-                            6 -> listOf(Icons.Default.Bed to "Rest", Icons.Default.Wc to "WC", Icons.Default.LocalParking to "P")
-                            7 -> listOf(Icons.Default.Scale to "Weight")
-                            8 -> listOf(Icons.Default.TireRepair to "Tyres", Icons.Default.Build to "Repair")
+                            0 -> listOf(Icons.Default.LocalGasStation to "Fuel", Icons.Default.Wc to "WC", Icons.Default.LocalParking to "P", Icons.Default.Shower to "Shower")
+                            2 -> listOf(Icons.Default.LocalCarWash to "Wash")
+                            3 -> listOf(Icons.Default.Restaurant to "Food")
+                            5 -> listOf(Icons.Default.Bed to "Rest", Icons.Default.Wc to "WC")
+                            6 -> listOf(Icons.Default.Scale to "Weight")
+                            7 -> listOf(Icons.Default.TireRepair to "Tyres", Icons.Default.Build to "Repair")
                             else -> listOf(categories[selected].second to categories[selected].first)
                         }
                         facilities.take(4).forEach { (facilityIcon, label) ->
