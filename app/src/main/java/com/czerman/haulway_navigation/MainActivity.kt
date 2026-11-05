@@ -1427,6 +1427,7 @@ function render(){
    // Retain only visible tiles after the replacement set is ready. This avoids blank frames.
    for(const [key,node] of tileCache){if(!wanted.has(key)){node.remove();tileCache.delete(key);}}
    if(loadedNow===0&&failedNow>0)showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');
+   else if(loadedNow>0){status.style.display='none';}
    console.log('Map tile layer ready: provider='+providers[provider].name+', '+loadedNow+' loaded, '+failedNow+' failed; cached='+tileCache.size);
  }
  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
@@ -1500,6 +1501,19 @@ function drawPoiMarkers(){
   poiMarkers.appendChild(el);
  }
 }
+
+function fetchM62Overlay(bounds,requestId){
+ const box=bounds.south+','+bounds.west+','+bounds.north+','+bounds.east;
+ const q='[out:json][timeout:15];way[highway~"^(motorway|trunk)$"][ref~"M62"]('+box+');out geom;';
+ const endpoints=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+ let endpoint=0;
+ const run=()=>fetch(endpoints[endpoint],{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q)})
+  .then(r=>{if(!r.ok)throw Error('M62 overlay HTTP '+r.status);return r.json();})
+  .then(data=>{if(requestId!==poiRequestId)return;poiRoadGeometry=(data.elements||[]).filter(el=>Array.isArray(el.geometry)&&el.geometry.length>1).map(el=>el.geometry);drawPoiMarkers();console.log('HAULWAY M62 geometry segments: '+poiRoadGeometry.length);})
+  .catch(err=>{if(endpoint<endpoints.length-1){endpoint++;return run();}console.warn('M62 overlay unavailable: '+err.message);});
+ run();
+}
+
 function fetchPoiCategory(category){
  if(!category)return;
  const id=++poiRequestId;poiFetchBusy=true;
@@ -1521,8 +1535,8 @@ function fetchPoiCategory(category){
     const icon=category==='fuel'?(brand.includes('shell')?'S':brand.includes('bp')?'✿':brand.includes('esso')?'E':'F'):category==='parking'?'P':category==='restaurant'?'餐':category==='shop'?'S':category==='rest_area'?'R':category==='weighbridge'?'W':category==='tyre'?'T':'🔧';
     return {lat,lon,kind,name,icon};
    }).filter(Boolean).slice(0,80);
-   poiRoadGeometry=(data.elements||[]).filter(el=>Array.isArray(el.geometry)&&el.geometry.length>1&&((el.tags||{}).ref==='M62')).map(el=>el.geometry);
    drawPoiMarkers();status.style.display='none';
+   fetchM62Overlay(bounds,id);
    console.log('HAULWAY POI '+category+': '+poiFeatures.length+' real OpenStreetMap features');
   }).catch(err=>{
    if(endpoint<endpoints.length-1){endpoint++;return request();}
