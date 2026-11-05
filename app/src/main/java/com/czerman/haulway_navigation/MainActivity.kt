@@ -1408,7 +1408,7 @@ function roadFeatureKind(t){if(t.highway==='stop')return 'stop';if(t.highway==='
 function roadFeatureLabel(k,t){if(k==='stop')return 'STOP';if(k==='giveway'||k==='signal')return '';if(k==='speed')return String(t.maxspeed).replace(/[^0-9]/g,'').slice(0,3)||'!';if(k==='camera')return '⌁';if(k==='truckpark')return 'HGV';if(k==='parking')return 'P';if(k==='fuel')return 'F';return t.amenity==='toilets'?'WC':t.shop==='car_repair'?'🔧':t.amenity==='car_wash'?'W':t.amenity==='weighbridge'?'WGT':t.shop?'SHOP':t.tourism?'INFO':t.leisure?'REC':'•';}
 function refreshRoadData(){const now=Date.now();if(zoom<13||roadFetchBusy||now-roadFetchAt<45000)return;if(roadFetchCenter&&Math.abs(center.lat-roadFetchCenter.lat)<0.008&&Math.abs(center.lon-roadFetchCenter.lon)<0.008)return;roadFetchAt=now;roadFetchCenter={lat:center.lat,lon:center.lon};roadFetchBusy=true;const box=(center.lat-0.012)+','+(center.lon-0.018)+','+(center.lat+0.012)+','+(center.lon+0.018);const q='[out:json][timeout:15];(node[highway~"^(stop|give_way|traffic_signals|speed_camera)$"]('+box+');node[enforcement="maxspeed"]('+box+');node[maxspeed]('+box+');way[maxspeed]('+box+');node[amenity~"^(parking|fuel|toilets|restaurant|fast_food|car_wash|weighbridge)$"]('+box+');way[amenity~"^(parking|fuel|restaurant|fast_food)$"]('+box+');node[highway~"^(rest_area|services)$"]('+box+');way[highway~"^(rest_area|services)$"]('+box+');node[amenity]('+box+');way[amenity]('+box+');node[shop]('+box+');way[shop]('+box+');node[tourism]('+box+');node[leisure]('+box+'););out center;';let endpoint=0;const request=()=>fetch(overpassEndpoints[endpoint],{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:'data='+encodeURIComponent(q)}).then(r=>{if(!r.ok)throw Error('Overpass HTTP '+r.status);return r.json();}).then(data=>{const seen=new Set();roadFeatures=(data.elements||[]).map(el=>{const t=el.tags||{},kind=roadFeatureKind(t),lat=el.lat??(el.center&&el.center.lat),lon=el.lon??(el.center&&el.center.lon);if(!kind||!Number.isFinite(lat)||!Number.isFinite(lon))return null;const key=kind+':'+lat.toFixed(5)+':'+lon.toFixed(5);if(seen.has(key))return null;seen.add(key);return{lat,lon,kind,label:roadFeatureLabel(kind,t),name:t.name||'',maxspeed:t.maxspeed||''};}).filter(Boolean).slice(0,180);drawRoadMarkers();console.log('OSM road overlay loaded: '+roadFeatures.length+' features');}).catch(err=>{if(endpoint<overpassEndpoints.length-1){endpoint++;return request();}console.warn('OSM road overlay unavailable: '+err.message);}).finally(()=>{roadFetchBusy=false;});request();}
 function drawRoadMarkers(){roadMarkers.textContent='';const sz=size();for(const f of roadFeatures){const p=screenPoint(f.lat,f.lon);if(p.x < -35||p.y < -40||p.x>sz.w+35||p.y>sz.h+40)continue;const el=document.createElement('div');el.className='road-marker '+f.kind;el.style.left=p.x+'px';el.style.top=p.y+'px';if(f.kind==='signal'){const lamp=document.createElement('span');el.appendChild(lamp);}else if(f.kind!=='giveway'){el.textContent=f.label;}el.title=f.kind==='speed'?'Speed limit '+f.maxspeed:(f.name||f.kind);if(f.name||f.kind==='speed'){const label=document.createElement('small');label.className='road-marker-label';label.textContent=f.kind==='speed'?f.maxspeed:(f.name.length>24?f.name.slice(0,22)+'…':f.name);el.appendChild(label);}roadMarkers.appendChild(el);}}
-function drawTrafficMarkers(){trafficMarkers.textContent='';trafficLines.textContent='';const sz=size();trafficLines.setAttribute('viewBox','0 0 '+sz.w+' '+sz.h);const ns='http://www.w3.org/2000/svg';for(const f of trafficFeatures){const kind=String(f.category||'other').replace(/[^a-z]/gi,'');const color=(kind==='accident'||kind==='brokendownvehicle')?'#e33b46':(kind==='jam'?'#f0a02b':(kind==='roadworks'||kind==='roadclosed'||kind==='laneclosed'?'#ff7838':'#55b9ed'));const points=Array.isArray(f.geometryPoints)?f.geometryPoints:[];if(points.length>1){const projected=points.map(c=>screenPoint(Number(c[1]),Number(c[0])));const visible=projected.some(p=>p.x>=-30&&p.y>=-30&&p.x<=sz.w+30&&p.y<=sz.h+30);if(visible){const casing=document.createElementNS(ns,'polyline');casing.setAttribute('points',projected.map(p=>p.x+','+p.y).join(' '));casing.setAttribute('fill','none');casing.setAttribute('stroke','#07131dcc');casing.setAttribute('stroke-width','10');casing.setAttribute('stroke-linecap','round');casing.setAttribute('stroke-linejoin','round');trafficLines.appendChild(casing);const line=document.createElementNS(ns,'polyline');line.setAttribute('points',projected.map(p=>p.x+','+p.y).join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',color);line.setAttribute('stroke-width','6');line.setAttribute('stroke-linecap','round');line.setAttribute('stroke-linejoin','round');line.setAttribute('stroke-dasharray',kind==='jam'?'10 5':'none');trafficLines.appendChild(line);}}const p=screenPoint(f.latitude,f.longitude);if(p.x < -35||p.y < -40||p.x>sz.w+35||p.y>sz.h+40)continue;const el=document.createElement('div');el.className='traffic-marker '+(kind||'other');el.style.left=p.x+'px';el.style.top=p.y+'px';el.textContent=kind==='accident'?'!' : kind==='jam'?'≈' : kind==='roadworks'?'⚒' : kind==='brokendownvehicle'?'B' : '!';el.title=[f.category,f.description,f.road].filter(Boolean).join(' · ');trafficMarkers.appendChild(el);}}
+function drawTrafficMarkers(){trafficMarkers.textContent='';trafficLines.textContent='';const sz=size();trafficLines.setAttribute('viewBox','0 0 '+sz.w+' '+sz.h);const ns='http://www.w3.org/2000/svg';for(const f of trafficFeatures){const kind=String(f.category||'other').replace(/[^a-z]/gi,'');const color=(kind==='accident'||kind==='brokendownvehicle')?'#e33b46':(kind==='jam'?'#f0a02b':(kind==='roadworks'||kind==='roadclosed'||kind==='laneclosed'?'#ff7838':'#55b9ed'));const segments=Array.isArray(f.geometrySegments)&&f.geometrySegments.length?f.geometrySegments:(Array.isArray(f.geometryPoints)?[f.geometryPoints]:[]);for(const segment of segments){if(!Array.isArray(segment)||segment.length<2)continue;const projected=segment.map(c=>screenPoint(Number(c[1]),Number(c[0])));const visible=projected.some(p=>p.x>=-30&&p.y>=-30&&p.x<=sz.w+30&&p.y<=sz.h+30);if(visible){const casing=document.createElementNS(ns,'polyline');casing.setAttribute('points',projected.map(p=>p.x+','+p.y).join(' '));casing.setAttribute('fill','none');casing.setAttribute('stroke','#07131dcc');casing.setAttribute('stroke-width','10');casing.setAttribute('stroke-linecap','round');casing.setAttribute('stroke-linejoin','round');trafficLines.appendChild(casing);const line=document.createElementNS(ns,'polyline');line.setAttribute('points',projected.map(p=>p.x+','+p.y).join(' '));line.setAttribute('fill','none');line.setAttribute('stroke',color);line.setAttribute('stroke-width','6');line.setAttribute('stroke-linecap','round');line.setAttribute('stroke-linejoin','round');line.setAttribute('stroke-dasharray',kind==='jam'?'10 5':'none');trafficLines.appendChild(line);}}const p=screenPoint(f.latitude,f.longitude);if(p.x < -35||p.y < -40||p.x>sz.w+35||p.y>sz.h+40)continue;const el=document.createElement('div');el.className='traffic-marker '+(kind||'other');el.style.left=p.x+'px';el.style.top=p.y+'px';el.textContent=kind==='accident'?'!' : kind==='jam'?'≈' : kind==='roadworks'?'⚒' : kind==='brokendownvehicle'?'B' : '!';el.title=[f.category,f.description,f.road].filter(Boolean).join(' · ');trafficMarkers.appendChild(el);}}
 window.haulwaySetTrafficIncidents=function(json){try{const raw=JSON.parse(json);trafficFeatures=Array.isArray(raw)?raw.filter(f=>Number.isFinite(Number(f.latitude))&&Number.isFinite(Number(f.longitude))&&Math.abs(Number(f.latitude))<=90&&Math.abs(Number(f.longitude))<=180):[];drawTrafficMarkers();console.log('TomTom incidents displayed on map: '+trafficFeatures.length);}catch(e){console.error('Traffic marker data error: '+e);}};
 
 function scheduleRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;render();});}
@@ -1737,6 +1737,13 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                     put("latitude", incident.latitude!!)
                     put("longitude", incident.longitude!!)
                     put("geometryPoints", org.json.JSONArray().apply { incident.geometryPoints.forEach { point -> put(org.json.JSONArray().put(point.first).put(point.second)) } })
+                    put("geometrySegments", org.json.JSONArray().apply {
+                        incident.geometrySegments.forEach { segment ->
+                            put(org.json.JSONArray().apply {
+                                segment.forEach { point -> put(org.json.JSONArray().put(point.first).put(point.second)) }
+                            })
+                        }
+                    })
                 })
             }
         }.toString()
@@ -2394,7 +2401,8 @@ private data class HaulwayTrafficIncident(
     val delaySeconds: Int,
     val latitude: Double?,
     val longitude: Double?,
-    val geometryPoints: List<Pair<Double, Double>> = emptyList()
+    val geometryPoints: List<Pair<Double, Double>> = emptyList(),
+    val geometrySegments: List<List<Pair<Double, Double>>> = emptyList()
 )
 
 private data class HaulwayTrafficSnapshot(
@@ -2483,15 +2491,32 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
                 val geometry = item.optJSONObject("geometry")
                 val coordinates = geometry?.optJSONArray("coordinates")
                 val geometryType = geometry?.optString("type").orEmpty()
-                val geometryPoints = when (geometryType) {
-                    "Point" -> if (coordinates != null && coordinates.length() >= 2) listOf(coordinates.optDouble(0) to coordinates.optDouble(1)) else emptyList()
-                    "LineString" -> (0 until (coordinates?.length() ?: 0)).mapNotNull { pointIndex ->
-                        val point = coordinates?.optJSONArray(pointIndex) ?: return@mapNotNull null
-                        if (point.length() < 2) null else point.optDouble(0) to point.optDouble(1)
-                    }.filter { it.first.isFinite() && it.second.isFinite() && kotlin.math.abs(it.first) <= 180.0 && kotlin.math.abs(it.second) <= 90.0 }
+                fun parseCoordinateLine(line: org.json.JSONArray?): List<Pair<Double, Double>> =
+                    (0 until (line?.length() ?: 0)).mapNotNull { pointIndex ->
+                        val point = line?.optJSONArray(pointIndex) ?: return@mapNotNull null
+                        if (point.length() < 2) return@mapNotNull null
+                        val longitude = point.optDouble(0, Double.NaN)
+                        val latitude = point.optDouble(1, Double.NaN)
+                        if (longitude.isFinite() && latitude.isFinite() &&
+                            kotlin.math.abs(longitude) <= 180.0 && kotlin.math.abs(latitude) <= 90.0
+                        ) longitude to latitude else null
+                    }
+                val geometrySegments: List<List<Pair<Double, Double>>> = when (geometryType) {
+                    "Point" -> {
+                        val longitude = coordinates?.optDouble(0, Double.NaN) ?: Double.NaN
+                        val latitude = coordinates?.optDouble(1, Double.NaN) ?: Double.NaN
+                        if (longitude.isFinite() && latitude.isFinite() &&
+                            kotlin.math.abs(longitude) <= 180.0 && kotlin.math.abs(latitude) <= 90.0
+                        ) listOf(listOf(longitude to latitude)) else emptyList()
+                    }
+                    "LineString" -> listOf(parseCoordinateLine(coordinates)).filter { it.isNotEmpty() }
+                    "MultiLineString" -> (0 until (coordinates?.length() ?: 0)).mapNotNull { segmentIndex ->
+                        parseCoordinateLine(coordinates?.optJSONArray(segmentIndex)).takeIf { it.isNotEmpty() }
+                    }
                     else -> emptyList()
                 }
-                val firstPoint = if (geometryType == "Point") coordinates else coordinates?.optJSONArray(0)
+                val geometryPoints = geometrySegments.firstOrNull().orEmpty()
+                val firstCoordinate = geometrySegments.firstOrNull()?.firstOrNull()
                 val events = props.optJSONArray("events")
                 val description = events?.optJSONObject(0)?.optString("description").orEmpty()
                 val roads = props.optJSONArray("roadNumbers")
@@ -2505,9 +2530,10 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
                         listOf(props.optString("from"), props.optString("to")).filter { it.isNotBlank() }.joinToString(" → ")
                     },
                     delaySeconds = props.optInt("delayInSeconds", 0),
-                    latitude = if (firstPoint != null && firstPoint.length() >= 2) firstPoint.optDouble(1).takeIf { it.isFinite() } else null,
-                    longitude = if (firstPoint != null && firstPoint.length() >= 2) firstPoint.optDouble(0).takeIf { it.isFinite() } else null,
-                    geometryPoints = geometryPoints
+                    latitude = firstCoordinate?.second,
+                    longitude = firstCoordinate?.first,
+                    geometryPoints = geometryPoints,
+                    geometrySegments = geometrySegments
                 )
             }
             HaulwayTrafficSnapshot(incidents, System.currentTimeMillis(), connection.getHeaderField("TrafficModelID"))
