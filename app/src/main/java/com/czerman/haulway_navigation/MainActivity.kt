@@ -1863,6 +1863,11 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                 setBackgroundColor(android.graphics.Color.rgb(23, 35, 43))
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                // The bundled map HTML is loaded from file:///android_asset/. Allow its
+                // trusted JavaScript to call HTTPS map/Overpass endpoints; otherwise
+                // WebView can reject fetch() from the opaque local-file origin.
+                settings.allowFileAccessFromFileURLs = true
+                settings.allowUniversalAccessFromFileURLs = true
                 addJavascriptInterface(object {
                     @JavascriptInterface
                     fun onPoiResults(json: String) {
@@ -1880,6 +1885,12 @@ private fun RoutePlannerMapView(routeJson: String?, incidents: List<HaulwayTraff
                 isVerticalScrollBarEnabled = false
                 isHorizontalScrollBarEnabled = false
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(message: android.webkit.ConsoleMessage): Boolean {
+                        android.util.Log.e("HAULWAY_ROUTE_MAP_JS", "${message.message()} -- ${message.sourceId()}:${message.lineNumber()}")
+                        return true
+                    }
+                }
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String?) {
                         pageReady = true
