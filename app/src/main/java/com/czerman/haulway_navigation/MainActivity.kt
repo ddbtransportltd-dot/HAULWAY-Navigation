@@ -1253,7 +1253,7 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
     }
 }
 
-private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
+private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
 
 private object HaulwayGpsMarkerAnimation {
     var latitude: Double? = null
@@ -1401,13 +1401,11 @@ private fun HaulwayNativeMapCanvas(
     var styleReady by remember { mutableStateOf(false) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
-    var cachedStyleJson by remember { mutableStateOf<String?>(null) }
+    val styleCachePrefs = remember(context) { context.getSharedPreferences("haulway_map_style_cache", Context.MODE_PRIVATE) }
+    var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_dark_matter_style", null)) }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
-    val activeStyleUrl = if (mapStyleRequest % 2 == 0) {
-        HAULWAY_NATIVE_MAP_STYLE_URL
-    } else {
-        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-    }
+    // Use the same CARTO Dark Matter family as the embedded POI/parking/traffic maps.
+    val activeStyleUrl = HAULWAY_NATIVE_MAP_STYLE_URL
 
     val mapView = remember(context) {
         MapLibre.getInstance(context)
@@ -1462,8 +1460,8 @@ private fun HaulwayNativeMapCanvas(
             } else {
                 withContext(Dispatchers.IO) {
                 val connection = URL(activeStyleUrl).openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 12000
-                connection.readTimeout = 18000
+                connection.connectTimeout = 5000
+                connection.readTimeout = 7000
                 try {
                     connection.inputStream.bufferedReader().use { it.readText() }
                 } finally {
@@ -1472,6 +1470,9 @@ private fun HaulwayNativeMapCanvas(
                 }.also {
                     cachedStyleUrl = activeStyleUrl
                     cachedStyleJson = it
+                    // Keep the last valid style locally so the globe does not need to
+                    // download the style document again on every app/map recreation.
+                    styleCachePrefs.edit().putString("carto_dark_matter_style", it).apply()
                 }
             }
 
