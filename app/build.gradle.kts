@@ -44,8 +44,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.3.0-vision13"
+        versionCode = 25
+        versionName = "2.2.1-vision21-native-globe-poi"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
@@ -74,6 +74,7 @@ android {
 }
 
 dependencies {
+    implementation("org.maplibre.gl:android-sdk-opengl:2026.10.19-globe")
     implementation("androidx.compose.material:material-icons-extended")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
