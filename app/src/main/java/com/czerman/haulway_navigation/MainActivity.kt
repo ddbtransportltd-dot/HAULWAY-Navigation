@@ -1052,6 +1052,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         val mins = (secondsLeft / 60.0).toInt().coerceAtLeast(0)
                         "${mins / 60} h ${mins % 60} min"
                     } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
+                    val arrivalLabel = remainingDurationSeconds?.let {
+                        SimpleDateFormat("HH:mm", Locale.UK).format(Date(System.currentTimeMillis() + (it * 1000.0).toLong()))
+                    } ?: "—"
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -1062,6 +1065,11 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Column(Modifier.weight(0.75f)) {
+                                Text("ARRIVAL", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(arrivalLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                         }
                     }
