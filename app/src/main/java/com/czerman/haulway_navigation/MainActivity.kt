@@ -1017,26 +1017,25 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Spacer(Modifier.width(5.dp)); Icon(Icons.Default.BatteryFull, null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
                 }
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
-                    val maneuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)
-                    if (maneuver != null) {
-                        val distanceLabel = distanceToManeuver?.let(::formatNavigationDistance) ?: "—"
+                    RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(4).forEachIndexed { index, maneuver ->
+                        val distanceLabel = if (index == 0) distanceToManeuver?.let(::formatNavigationDistance) ?: "—" else "UP NEXT"
                         NavigationStepCard(
                             maneuverIconFor(maneuver.label), distanceLabel,
-                            maneuver.label + if (maneuver.roadName.isNotBlank()) " · ${maneuver.roadName}" else "",
-                            blue
+                            maneuver.label + if (maneuver.roadName.isNotBlank()) " · " + maneuver.roadName else "",
+                            if (index == 0) blue else Color(0xFF526575)
                         )
                     }
                 } else {
                     NavigationStepCard(Icons.Default.Navigation, "—", "Waiting for route", blue)
                 }
-                MapQuickActionCard(
-                    icon = Icons.Default.LocalParking, title = "Truck parking", subtitle = "Find nearby parking",
-                    onClick = { onNavigate("TRUCK PARKING") }
-                )
-                MapQuickActionCard(
-                    icon = Icons.Default.LocalGasStation, title = "Services", subtitle = "Fuel, food & facilities",
-                    onClick = { onNavigate("SERVICES & POI") }
-                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        MapQuickActionCard(icon = Icons.Default.LocalParking, title = "Truck parking", subtitle = "Nearby", onClick = { onNavigate("TRUCK PARKING") })
+                    }
+                    Box(Modifier.weight(1f)) {
+                        MapQuickActionCard(icon = Icons.Default.LocalGasStation, title = "Services", subtitle = "Fuel & facilities", onClick = { onNavigate("SERVICES & POI") })
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 Text("DESTINATION", color = Color(0xFF91A2AE), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
                 Text(
