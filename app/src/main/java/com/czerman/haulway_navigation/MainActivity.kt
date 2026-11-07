@@ -989,6 +989,19 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Box(contentAlignment = Alignment.Center) { Text("−", color = White, fontSize = 27.sp, fontWeight = FontWeight.Medium) }
                     }
                 }
+                if (liveLatitude != null && liveLongitude != null) {
+                    Surface(
+                        Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 80.dp),
+                        shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))
+                    ) {
+                        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocationOn, null, tint = Color(0xFF58B9F2), modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(String.format(Locale.UK, "%.5f, %.5f", liveLatitude, liveLongitude), color = White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
                 // The live vehicle marker is drawn by the map only after a real GPS fix.
             }
 
