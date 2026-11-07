@@ -1533,6 +1533,7 @@ private fun HaulwayNativeMapCanvas(
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
     var globeMode by remember { mutableStateOf(true) }
+    var forceGpsRecenter by remember { mutableStateOf(false) }
     var styleReady by remember { mutableStateOf(false) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
@@ -1758,7 +1759,7 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, tilt3D, distanceToManeuver) {
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver) {
         val map = mapLibreMap ?: return@LaunchedEffect
         val camera = if (globeMode) {
             CameraPosition.Builder()
@@ -1770,8 +1771,9 @@ private fun HaulwayNativeMapCanvas(
         } else {
             val hasGps = latitude != null && longitude != null
             val currentCamera = map.cameraPosition
-            val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
-            val baseZoom = if (hasGps && followEnabled) (15.0 + zoom.toDouble()) else currentCamera.zoom
+            val shouldFollowGps = hasGps && (followEnabled || forceGpsRecenter)
+            val target = if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
+            val baseZoom = if (shouldFollowGps) (15.0 + zoom.toDouble()) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
@@ -1800,7 +1802,7 @@ private fun HaulwayNativeMapCanvas(
             Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).height(38.dp).clickable {
                 if (globeMode) {
                     globeMode = false
-                    followEnabled = true
+                    forceGpsRecenter = true
                 } else {
                     globeMode = true
                 }
