@@ -643,6 +643,10 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     LaunchedEffect(Unit) { while (true) { clockText = SimpleDateFormat("HH:mm", Locale.UK).format(Date()); kotlinx.coroutines.delay(1000) } }
     var soundOn by remember { mutableStateOf(true) }
     var liveSpeedMph by remember { mutableStateOf<Double?>(null) }
+    var liveSpeedLimitMph by remember { mutableStateOf<Int?>(null) }
+    var lastSpeedLimitFetchAt by remember { mutableLongStateOf(0L) }
+    var lastSpeedLimitFetchLat by remember { mutableStateOf<Double?>(null) }
+    var lastSpeedLimitFetchLon by remember { mutableStateOf<Double?>(null) }
     var liveLatitude by remember { mutableStateOf<Double?>(null) }
     var liveLongitude by remember { mutableStateOf<Double?>(null) }
     var liveBearing by remember { mutableStateOf<Float?>(null) }
@@ -670,6 +674,54 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             speechReady = false
         }
     }
+    LaunchedEffect(liveLatitude, liveLongitude) {
+        val lat = liveLatitude ?: return@LaunchedEffect
+        val lon = liveLongitude ?: return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        val previousLat = lastSpeedLimitFetchLat
+        val previousLon = lastSpeedLimitFetchLon
+        val movedMetres = if (previousLat != null && previousLon != null) {
+            val dLat = Math.toRadians(lat - previousLat)
+            val dLon = Math.toRadians(lon - previousLon)
+            6371000.0 * kotlin.math.sqrt(dLat * dLat + dLon * dLon * kotlin.math.cos(Math.toRadians(lat)).let { it * it })
+        } else Double.MAX_VALUE
+        if (now - lastSpeedLimitFetchAt < 30000L && movedMetres < 100.0) return@LaunchedEffect
+        lastSpeedLimitFetchAt = now
+        lastSpeedLimitFetchLat = lat
+        lastSpeedLimitFetchLon = lon
+        liveSpeedLimitMph = withContext(Dispatchers.IO) {
+            runCatching {
+                val query = "[out:json][timeout:8];way(around:120,$lat,$lon)[maxspeed];out center tags;"
+                val url = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 5000
+                connection.readTimeout = 9000
+                try {
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val elements = JSONObject(response).optJSONArray("elements") ?: org.json.JSONArray()
+                    var nearestValue: Int? = null
+                    var nearestDistance = Double.MAX_VALUE
+                    for (index in 0 until elements.length()) {
+                        val item = elements.optJSONObject(index) ?: continue
+                        val center = item.optJSONObject("center") ?: continue
+                        val tags = item.optJSONObject("tags") ?: continue
+                        val raw = tags.optString("maxspeed", "").lowercase(Locale.UK)
+                        val number = Regex("\\\\d+(?:\\\\.\\\\d+)?").find(raw)?.value?.toDoubleOrNull() ?: continue
+                        val mph = if (raw.contains("km/h") || raw.contains("kph")) number * 0.621371 else number
+                        val roadLat = center.optDouble("lat", Double.NaN)
+                        val roadLon = center.optDouble("lon", Double.NaN)
+                        if (!roadLat.isFinite() || !roadLon.isFinite()) continue
+                        val dLat = Math.toRadians(roadLat - lat)
+                        val dLon = Math.toRadians(roadLon - lon)
+                        val distance = 6371000.0 * kotlin.math.sqrt(dLat * dLat + dLon * dLon * kotlin.math.cos(Math.toRadians(lat)).let { it * it })
+                        if (distance < nearestDistance) { nearestDistance = distance; nearestValue = mph.toInt() }
+                    }
+                    if (nearestDistance <= 120.0) nearestValue else null
+                } finally { connection.disconnect() }
+            }.getOrNull()
+        }
+    }
+
     LaunchedEffect(RoutePlanStore.coordinatesJson) {
         activeManeuverIndex = 0
         distanceToManeuver = null
@@ -942,7 +994,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         shadowElevation = 7.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("—", color = Color(0xFF20252A), fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                            Text(liveSpeedLimitMph?.toString() ?: "—", color = Color(0xFF20252A), fontSize = if ((liveSpeedLimitMph ?: 0) >= 100) 16.sp else 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                         }
                     }
                     Surface(shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))) {
