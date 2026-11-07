@@ -2610,6 +2610,17 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
         else -> when(field) { "height" -> "3.70"; "width" -> "2.55"; else -> "13.50" }
     }
     val currentType = profiles.getOrElse(selectedProfile) { "ARTIC" }
+    var unitSystem by remember { mutableStateOf(prefs.getString("dimensionUnits", "Metric (m)") ?: "Metric (m)") }
+    val isImperial = unitSystem == "Imperial (ft)"
+    val dimensionUnit = if (isImperial) "ft" else "m"
+    fun displayDimension(metres: String): String {
+        val value = metres.toDoubleOrNull() ?: return metres
+        return if (isImperial) String.format(Locale.UK, "%.2f", value * 3.28084) else metres
+    }
+    fun storeDimension(displayValue: String): String {
+        val value = displayValue.replace(',', '.').toDoubleOrNull() ?: return displayValue
+        return String.format(Locale.UK, "%.2f", if (isImperial) value / 3.28084 else value)
+    }
     var vehicleType by remember { mutableStateOf(prefs.getString("vehicleType", "Articulated") ?: "Articulated") }
     var trailerType by remember { mutableStateOf(prefs.getString("trailerType", "Standard") ?: "Standard") }
     var height by remember { mutableStateOf(prefs.getString("profile_${selectedProfile}_height", defaultDimension(currentType, "height")) ?: defaultDimension(currentType, "height")) }
@@ -2631,16 +2642,18 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
             Text(label, color = muted, fontSize = 12.sp, maxLines = 1)
             androidx.compose.material3.OutlinedTextField(
                 value = value, onValueChange = { newValue ->
-                    onValue(newValue)
-                    val key = when (label) {
-                        "Total Weight (kg)" -> "profile_${selectedProfile}_gross"
-                        "Axle Weight (kg)" -> "profile_${selectedProfile}_axle"
-                        "Height (m)" -> "profile_${selectedProfile}_height"
-                        "Width (m)" -> "profile_${selectedProfile}_width"
-                        "Length (m)" -> "profile_${selectedProfile}_length"
+                    val isDimension = label.startsWith("Height (") || label.startsWith("Width (") || label.startsWith("Length (")
+                    val storedValue = if (isDimension) storeDimension(newValue) else newValue
+                    onValue(if (isDimension) storedValue else newValue)
+                    val key = when {
+                        label == "Total Weight (kg)" -> "profile_${selectedProfile}_gross"
+                        label == "Axle Weight (kg)" -> "profile_${selectedProfile}_axle"
+                        label.startsWith("Height (") -> "profile_${selectedProfile}_height"
+                        label.startsWith("Width (") -> "profile_${selectedProfile}_width"
+                        label.startsWith("Length (") -> "profile_${selectedProfile}_length"
                         else -> label
                     }
-                    prefs.edit().putString(key, newValue).apply()
+                    prefs.edit().putString(key, storedValue).apply()
                     saved = true
                 }, singleLine = true,
                 modifier = Modifier.fillMaxWidth().height(46.dp),
@@ -2666,6 +2679,7 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
                         "Vehicle Type" -> { vehicleType = option; prefs.edit().putString("vehicleType", option).apply() }
                         "Trailer Type" -> { trailerType = option; prefs.edit().putString("trailerType", option).apply() }
                         "Load Type" -> { loadType = option; prefs.edit().putString("loadType", option).apply() }
+                        "Dimension Units" -> { unitSystem = option; prefs.edit().putString("dimensionUnits", option).apply() }
                         "Max Speed" -> { maxSpeed = option.substringBefore(" mph"); prefs.edit().putString("maxSpeed", maxSpeed).apply() }
                     }
                     saved = true; menu = ""
@@ -2799,9 +2813,9 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
                         contentScale = ContentScale.FillBounds
                     )
                     // Dynamic values cover the sample numbers in the artwork and always mirror the editable fields.
-                    Text("H  $height m", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.CenterStart).offset(x = maxWidth * 0.01f, y = (-4).dp))
-                    Text("L  $length m", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.BottomCenter).offset(y = (-1).dp))
-                    Text("W  $width m", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 1.dp))
+                    Text("H  ${displayDimension(height)} $dimensionUnit", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.CenterStart).offset(x = maxWidth * 0.01f, y = (-4).dp))
+                    Text("L  ${displayDimension(length)} $dimensionUnit", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.BottomCenter).offset(y = (-1).dp))
+                    Text("W  ${displayDimension(width)} $dimensionUnit", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(1f, 2f), 4f)), modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 1.dp))
                 }
             }
             Row(Modifier.fillMaxWidth().weight(0.65f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2809,12 +2823,13 @@ private fun TruckProfileEditor(modifier: Modifier = Modifier) {
                     CompactValue("Total Weight (kg)", grossWeight, { grossWeight=it })
                     CompactValue("Axle Weight (kg)", axleWeight, { axleWeight=it })
                     Row(Modifier.fillMaxWidth()) {
-                        CompactValue("Height (m)", height, { height=it }, Modifier.weight(1f))
-                        CompactValue("Width (m)", width, { width=it }, Modifier.weight(1f))
+                        CompactValue("Height ($dimensionUnit)", displayDimension(height), { height=it }, Modifier.weight(1f))
+                        CompactValue("Width ($dimensionUnit)", displayDimension(width), { width=it }, Modifier.weight(1f))
                     }
-                    CompactValue("Length (m)", length, { length=it })
+                    CompactValue("Length ($dimensionUnit)", displayDimension(length), { length=it })
                 }
                 Column(Modifier.weight(0.95f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Choice("Dimension Units", unitSystem, listOf("Metric (m)", "Imperial (ft)"))
                     Choice("Vehicle Type", vehicleType, listOf("Articulated", "Rigid", "Van", "Drawbar") )
                     Choice("Trailer Type", trailerType, listOf("Standard", "Refrigerated", "Curtainsider", "Flatbed", "Tanker", "None"))
                     Choice("Load Type", loadType, listOf("General", "Hazardous", "Abnormal", "Refrigerated", "Livestock"))
