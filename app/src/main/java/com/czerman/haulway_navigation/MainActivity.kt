@@ -691,7 +691,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         lastSpeedLimitFetchLon = lon
         liveSpeedLimitMph = withContext(Dispatchers.IO) {
             runCatching {
-                val query = "[out:json][timeout:8];way(around:120,$lat,$lon)[maxspeed];out center tags;"
+                val query = "[out:json][timeout:8];way(around:45,$lat,$lon)[highway][maxspeed];out geom tags;"
                 val url = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 5000
@@ -701,22 +701,46 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     val elements = JSONObject(response).optJSONArray("elements") ?: org.json.JSONArray()
                     var nearestValue: Int? = null
                     var nearestDistance = Double.MAX_VALUE
+                    val earthRadius = 6371000.0
+                    val cosLatitude = kotlin.math.cos(Math.toRadians(lat))
                     for (index in 0 until elements.length()) {
                         val item = elements.optJSONObject(index) ?: continue
-                        val center = item.optJSONObject("center") ?: continue
                         val tags = item.optJSONObject("tags") ?: continue
                         val raw = tags.optString("maxspeed", "").lowercase(Locale.UK)
-                        val number = Regex("\\\\d+(?:\\\\.\\\\d+)?").find(raw)?.value?.toDoubleOrNull() ?: continue
+                        val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value?.toDoubleOrNull() ?: continue
                         val mph = if (raw.contains("km/h") || raw.contains("kph")) number * 0.621371 else number
-                        val roadLat = center.optDouble("lat", Double.NaN)
-                        val roadLon = center.optDouble("lon", Double.NaN)
-                        if (!roadLat.isFinite() || !roadLon.isFinite()) continue
-                        val dLat = Math.toRadians(roadLat - lat)
-                        val dLon = Math.toRadians(roadLon - lon)
-                        val distance = 6371000.0 * kotlin.math.sqrt(dLat * dLat + dLon * dLon * kotlin.math.cos(Math.toRadians(lat)).let { it * it })
-                        if (distance < nearestDistance) { nearestDistance = distance; nearestValue = mph.toInt() }
+                        val geometry = item.optJSONArray("geometry") ?: continue
+                        var wayDistance = Double.MAX_VALUE
+                        var previousX: Double? = null
+                        var previousY: Double? = null
+                        for (pointIndex in 0 until geometry.length()) {
+                            val point = geometry.optJSONObject(pointIndex) ?: continue
+                            val pointLat = point.optDouble("lat", Double.NaN)
+                            val pointLon = point.optDouble("lon", Double.NaN)
+                            if (!pointLat.isFinite() || !pointLon.isFinite()) continue
+                            val x = Math.toRadians(pointLon - lon) * earthRadius * cosLatitude
+                            val y = Math.toRadians(pointLat - lat) * earthRadius
+                            val ax = previousX
+                            val ay = previousY
+                            if (ax != null && ay != null) {
+                                val dx = x - ax
+                                val dy = y - ay
+                                val lengthSquared = dx * dx + dy * dy
+                                val t = if (lengthSquared > 0.0) ((-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)) else 0.0
+                                val distance = kotlin.math.sqrt((ax + t * dx).let { it * it } + (ay + t * dy).let { it * it })
+                                if (distance < wayDistance) wayDistance = distance
+                            } else {
+                                wayDistance = kotlin.math.min(wayDistance, kotlin.math.sqrt(x * x + y * y))
+                            }
+                            previousX = x
+                            previousY = y
+                        }
+                        if (wayDistance < nearestDistance) {
+                            nearestDistance = wayDistance
+                            nearestValue = mph.toInt()
+                        }
                     }
-                    if (nearestDistance <= 120.0) nearestValue else null
+                    if (nearestDistance <= 45.0) nearestValue else null
                 } finally { connection.disconnect() }
             }.getOrNull()
         }
