@@ -893,7 +893,10 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             Spacer(Modifier.weight(1f))
             Text(clockText, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Text("HGV NAVIGATION", color = Color(0xFF9FB0BC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(Modifier.size(28.dp).clickable { onNavigate("TRUCK PARKING") }, shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.LocalParking, "Truck parking", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
+                Surface(Modifier.size(28.dp).clickable { onNavigate("SERVICES & POI") }, shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.LocalGasStation, "Truck services", tint = Color(0xFFFFB56B), modifier = Modifier.size(17.dp)) } }
+            }
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
@@ -934,12 +937,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 // Single speed cluster. The old duplicate mini trip/ETA panel is removed.
                 Column(Modifier.align(Alignment.CenterStart).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.Start) {
                     Surface(
-                        modifier = Modifier.size(54.dp), shape = CircleShape, color = Color.White,
+                        modifier = Modifier.size(48.dp), shape = CircleShape, color = Color.White,
                         border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD93636)),
                         shadowElevation = 7.dp
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("—", color = Color(0xFF20252A), fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+                            Text("—", color = Color(0xFF20252A), fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
                         }
                     }
                     Surface(shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))) {
@@ -1328,7 +1331,7 @@ private fun updateHaulwayNativeMapOverlays(
             style.addLayer(
                 SymbolLayer("haulway-vehicle-marker", "haulway-vehicle-source").withProperties(
                     PropertyFactory.iconImage("haulway-vehicle-arrow"),
-                    PropertyFactory.iconSize(0.72f),
+                    PropertyFactory.iconSize(0.62f),
                     PropertyFactory.iconRotate(0f),
                     PropertyFactory.iconRotationAlignment("viewport"),
                     PropertyFactory.iconAllowOverlap(true),
@@ -1556,7 +1559,7 @@ private fun HaulwayNativeMapCanvas(
             val hasGps = latitude != null && longitude != null
             val currentCamera = map.cameraPosition
             val target = if (hasGps && followEnabled) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
-            val baseZoom = if (hasGps && followEnabled) (13.2 + (zoom - 4)) else currentCamera.zoom
+            val baseZoom = if (hasGps && followEnabled) (15.0 + zoom.toDouble()) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
