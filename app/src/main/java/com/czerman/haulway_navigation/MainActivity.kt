@@ -1526,6 +1526,7 @@ private fun HaulwayNativeMapCanvas(
     var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_dark_matter_style", null)) }
     var roadSignsJson by remember { mutableStateOf<String?>(null) }
     var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
+    var lastRoadSignsRouteKey by remember { mutableStateOf("") }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
     // Use the same CARTO Dark Matter family as the embedded POI/parking/traffic maps.
     val activeStyleUrl = HAULWAY_NATIVE_MAP_STYLE_URL
@@ -1567,55 +1568,83 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(latitude, longitude) {
-        if (latitude != null && longitude != null && globeMode) globeMode = false
-    }
-
-    LaunchedEffect(latitude, longitude) {
+    LaunchedEffect(latitude, longitude, routeJson) {
         val lat = latitude ?: return@LaunchedEffect
         val lon = longitude ?: return@LaunchedEffect
-        if (System.currentTimeMillis() - lastRoadSignsFetchAt < 45000L && roadSignsJson != null) return@LaunchedEffect
+        val routeKey = routeJson?.hashCode()?.toString() ?: "no-route"
+        val routeChanged = routeKey != lastRoadSignsRouteKey
+        if (!routeChanged && System.currentTimeMillis() - lastRoadSignsFetchAt < 45000L && roadSignsJson != null) return@LaunchedEffect
         lastRoadSignsFetchAt = System.currentTimeMillis()
+        lastRoadSignsRouteKey = routeKey
         roadSignsJson = withContext(Dispatchers.IO) {
             runCatching {
-                val query = "[out:json][timeout:12];(node(around:650,$lat,$lon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:650,$lat,$lon)[maxspeed];way(around:650,$lat,$lon)[highway][maxspeed];);out center tags;"
-                val endpoint = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
-                val connection = endpoint.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 6000
-                connection.readTimeout = 13000
-                try {
-                    val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                    val elements = response.optJSONArray("elements") ?: org.json.JSONArray()
-                    val features = org.json.JSONArray()
-                    val seen = HashSet<String>()
-                    for (index in 0 until elements.length()) {
-                        val item = elements.optJSONObject(index) ?: continue
-                        val tags = item.optJSONObject("tags") ?: continue
-                        val kind = when {
-                            tags.optString("highway") == "stop" -> "STOP"
-                            tags.optString("highway") == "give_way" -> "GIVE WAY"
-                            tags.optString("highway") == "traffic_signals" -> "●"
-                            tags.optString("highway") == "speed_camera" -> "CAM"
-                            tags.has("maxspeed") -> {
-                                val raw = tags.optString("maxspeed")
-                                val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value ?: continue
-                                val numeric = number.toDoubleOrNull() ?: continue
-                                val mph = if (raw.contains("km/h", true) || raw.contains("kph", true)) (numeric * 0.621371).toInt() else numeric.toInt()
-                                mph.toString()
-                            }
-                            else -> continue
+                // Search near the truck and at sampled points along the route to show signs ahead.
+                val centers = mutableListOf<Pair<Double, Double>>()
+                centers.add(lat to lon)
+                if (!routeJson.isNullOrBlank()) {
+                    val routePoints = org.json.JSONArray(routeJson)
+                    val sampleCount = minOf(12, routePoints.length())
+                    for (sample in 0 until sampleCount) {
+                        val index = if (sampleCount <= 1) 0 else (sample.toDouble() * (routePoints.length() - 1) / (sampleCount - 1)).toInt()
+                        val coordinate = routePoints.optJSONArray(index) ?: continue
+                        if (coordinate.length() >= 2) {
+                            val routeLon = coordinate.optDouble(0, Double.NaN)
+                            val routeLat = coordinate.optDouble(1, Double.NaN)
+                            if (routeLat.isFinite() && routeLon.isFinite()) centers.add(routeLat to routeLon)
                         }
-                        val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
-                        val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
-                        if (!latValue.isFinite() || !lonValue.isFinite()) continue
-                        val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
-                        if (!seen.add(key)) continue
-                        val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
-                        features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind)))
                     }
-                    JSONObject().put("type", "FeatureCollection").put("features", features).toString()
-                } finally { connection.disconnect() }
-            }.getOrNull()
+                }
+                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(13)
+                val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
+                    "node(around:250,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed];"
+                }
+                val query = "[out:json][timeout:18];($clauses);out center tags;"
+                val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+                var responseText: String? = null
+                for (endpointBase in endpoints) {
+                    try {
+                        val endpoint = URL(endpointBase + "?data=" + URLEncoder.encode(query, "UTF-8"))
+                        val connection = endpoint.openConnection() as java.net.HttpURLConnection
+                        connection.connectTimeout = 6000
+                        connection.readTimeout = 19000
+                        try { responseText = connection.inputStream.bufferedReader().use { it.readText() } }
+                        finally { connection.disconnect() }
+                        if (responseText != null) break
+                    } catch (error: Exception) {
+                        android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign endpoint failed: $endpointBase", error)
+                    }
+                }
+                val response = JSONObject(responseText ?: throw IllegalStateException("Road sign data unavailable"))
+                val elements = response.optJSONArray("elements") ?: org.json.JSONArray()
+                val features = org.json.JSONArray()
+                val seen = HashSet<String>()
+                for (index in 0 until elements.length()) {
+                    val item = elements.optJSONObject(index) ?: continue
+                    val tags = item.optJSONObject("tags") ?: continue
+                    val kind = when {
+                        tags.optString("highway") == "stop" -> "STOP"
+                        tags.optString("highway") == "give_way" -> "GIVE WAY"
+                        tags.optString("highway") == "traffic_signals" -> "●"
+                        tags.optString("highway") == "speed_camera" -> "CAM"
+                        tags.has("maxspeed") -> {
+                            val raw = tags.optString("maxspeed")
+                            val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value ?: continue
+                            val numeric = number.toDoubleOrNull() ?: continue
+                            val mph = if (raw.contains("km/h", true) || raw.contains("kph", true)) (numeric * 0.621371).toInt() else numeric.toInt()
+                            mph.toString()
+                        }
+                        else -> continue
+                    }
+                    val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
+                    val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
+                    if (!latValue.isFinite() || !lonValue.isFinite()) continue
+                    val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
+                    if (!seen.add(key)) continue
+                    val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
+                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind)))
+                }
+                JSONObject().put("type", "FeatureCollection").put("features", features).toString()
+            }.onFailure { android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign data unavailable", it) }.getOrNull()
         }
     }
 
