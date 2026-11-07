@@ -1361,8 +1361,34 @@ private fun updateHaulwayNativeMapOverlays(
     latitude: Double?,
     longitude: Double?,
     bearing: Float?,
-    searchLocation: Pair<Double, Double>?
+    searchLocation: Pair<Double, Double>?,
+    roadSignsJson: String?
 ) {
+    if (!roadSignsJson.isNullOrBlank()) {
+        runCatching {
+            val featureCollection = FeatureCollection.fromJson(roadSignsJson)
+            val source = style.getSourceAs<GeoJsonSource>("haulway-road-signs-source")
+            if (source != null) source.setGeoJson(featureCollection) else {
+                style.addSource(GeoJsonSource("haulway-road-signs-source", featureCollection))
+                style.addLayer(CircleLayer("haulway-road-signs-circles", "haulway-road-signs-source").withProperties(
+                    PropertyFactory.circleRadius(13f),
+                    PropertyFactory.circleColor("#F8F8F8"),
+                    PropertyFactory.circleStrokeColor("#D71920"),
+                    PropertyFactory.circleStrokeWidth(3f),
+                    PropertyFactory.circleOpacity(0.98f)
+                ))
+                style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withProperties(
+                    PropertyFactory.textField("{label}"),
+                    PropertyFactory.textSize(11f),
+                    PropertyFactory.textColor("#111111"),
+                    PropertyFactory.textHaloColor("#FFFFFF"),
+                    PropertyFactory.textHaloWidth(0.7f),
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true)
+                ))
+            }
+        }.onFailure { android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign overlay unavailable", it) }
+    }
     if (!routeJson.isNullOrBlank()) {
         runCatching {
             val input = org.json.JSONArray(routeJson)
@@ -1497,6 +1523,8 @@ private fun HaulwayNativeMapCanvas(
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
     val styleCachePrefs = remember(context) { context.getSharedPreferences("haulway_map_style_cache", Context.MODE_PRIVATE) }
     var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_dark_matter_style", null)) }
+    var roadSignsJson by remember { mutableStateOf<String?>(null) }
+    var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
     // Use the same CARTO Dark Matter family as the embedded POI/parking/traffic maps.
     val activeStyleUrl = HAULWAY_NATIVE_MAP_STYLE_URL
@@ -1540,6 +1568,54 @@ private fun HaulwayNativeMapCanvas(
 
     LaunchedEffect(latitude, longitude) {
         if (latitude != null && longitude != null && globeMode) globeMode = false
+    }
+
+    LaunchedEffect(latitude, longitude) {
+        val lat = latitude ?: return@LaunchedEffect
+        val lon = longitude ?: return@LaunchedEffect
+        if (System.currentTimeMillis() - lastRoadSignsFetchAt < 45000L && roadSignsJson != null) return@LaunchedEffect
+        lastRoadSignsFetchAt = System.currentTimeMillis()
+        roadSignsJson = withContext(Dispatchers.IO) {
+            runCatching {
+                val query = "[out:json][timeout:12];(node(around:650,$lat,$lon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:650,$lat,$lon)[maxspeed];way(around:650,$lat,$lon)[highway][maxspeed];);out center tags;"
+                val endpoint = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
+                val connection = endpoint.openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 6000
+                connection.readTimeout = 13000
+                try {
+                    val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val elements = response.optJSONArray("elements") ?: org.json.JSONArray()
+                    val features = org.json.JSONArray()
+                    val seen = HashSet<String>()
+                    for (index in 0 until elements.length()) {
+                        val item = elements.optJSONObject(index) ?: continue
+                        val tags = item.optJSONObject("tags") ?: continue
+                        val kind = when {
+                            tags.optString("highway") == "stop" -> "STOP"
+                            tags.optString("highway") == "give_way" -> "GIVE WAY"
+                            tags.optString("highway") == "traffic_signals" -> "●"
+                            tags.optString("highway") == "speed_camera" -> "CAM"
+                            tags.has("maxspeed") -> {
+                                val raw = tags.optString("maxspeed")
+                                val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value ?: continue
+                                val numeric = number.toDoubleOrNull() ?: continue
+                                val mph = if (raw.contains("km/h", true) || raw.contains("kph", true)) (numeric * 0.621371).toInt() else numeric.toInt()
+                                mph.toString()
+                            }
+                            else -> continue
+                        }
+                        val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
+                        val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
+                        if (!latValue.isFinite() || !lonValue.isFinite()) continue
+                        val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
+                        if (!seen.add(key)) continue
+                        val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
+                        features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind)))
+                    }
+                    JSONObject().put("type", "FeatureCollection").put("features", features).toString()
+                } finally { connection.disconnect() }
+            }.getOrNull()
+        }
     }
 
     // Load the basemap once. The native globe projection automatically blends into
@@ -1610,7 +1686,8 @@ private fun HaulwayNativeMapCanvas(
                     latitude,
                     longitude,
                     bearing,
-                    searchLocation
+                    searchLocation,
+                    roadSignsJson
                 )
                 android.util.Log.i(
                     "HAULWAY_MAPLIBRE",
@@ -1623,17 +1700,17 @@ private fun HaulwayNativeMapCanvas(
             if (!globeMode) {
                 map.setStyle(activeStyleUrl) {
                     styleReady = true
-                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, bearing, searchLocation)
+                    updateHaulwayNativeMapOverlays(it, routeJson, latitude, longitude, bearing, searchLocation, roadSignsJson)
                 }
             }
         }
     }
 
-    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, bearing, searchLocation) {
+    LaunchedEffect(mapLibreMap, styleReady, routeJson, latitude, longitude, bearing, searchLocation, roadSignsJson) {
         val map = mapLibreMap ?: return@LaunchedEffect
         if (!styleReady) return@LaunchedEffect
         map.getStyle { style ->
-            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, bearing, searchLocation)
+            updateHaulwayNativeMapOverlays(style, routeJson, latitude, longitude, bearing, searchLocation, roadSignsJson)
         }
     }
 
