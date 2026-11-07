@@ -1032,26 +1032,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
 
-                // Explicit globe/GPS switch: the globe must never trap the camera away from the live position.
-                Surface(
-                    Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 58.dp).height(38.dp).clickable {
-                        if (globeMode) {
-                            globeMode = false
-                            followEnabled = true
-                            mapFollowRequest++
-                        } else {
-                            globeMode = true
-                        }
-                    },
-                    shape = RoundedCornerShape(8.dp), color = Color(0xE9161D23),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
-                ) {
-                    Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Icon(if (globeMode) Icons.Default.MyLocation else Icons.Default.Public, null, tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp))
-                        Text(if (globeMode) "GPS" else "GLOBE", color = White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-
                 // Voice control sits near the top-right of the map, as in the Vision 2 reference.
                 Surface(
                     Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp).size(38.dp).clickable { soundOn = !soundOn },
@@ -1816,6 +1796,23 @@ private fun HaulwayNativeMapCanvas(
             modifier = Modifier.fillMaxSize(),
             factory = { mapView }
         )
+        Surface(
+            Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).height(38.dp).clickable {
+                if (globeMode) {
+                    globeMode = false
+                    followEnabled = true
+                } else {
+                    globeMode = true
+                }
+            },
+            shape = RoundedCornerShape(8.dp), color = Color(0xE9161D23),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+        ) {
+            Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Icon(if (globeMode) Icons.Default.MyLocation else Icons.Default.Public, null, tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp))
+                Text(if (globeMode) "GPS" else "GLOBE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
         if (styleError != null) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
