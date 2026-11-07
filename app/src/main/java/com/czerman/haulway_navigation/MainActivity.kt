@@ -1011,11 +1011,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     .background(Color(0xFF0B1117)).padding(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Row(Modifier.fillMaxWidth().height(22.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.SignalCellularAlt, null, tint = Color.LightGray, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(5.dp)); Icon(Icons.Default.Wifi, null, tint = Color.LightGray, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(5.dp)); Icon(Icons.Default.BatteryFull, null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
-                }
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
                     RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(4).forEachIndexed { index, maneuver ->
                         val distanceLabel = if (index == 0) distanceToManeuver?.let(::formatNavigationDistance) ?: "—" else "UP NEXT"
