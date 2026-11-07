@@ -971,8 +971,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             Text(clockText, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(28.dp).clickable { onNavigate("TRUCK PARKING") }, shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.LocalParking, "Truck parking", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
-                Surface(Modifier.size(28.dp).clickable { onNavigate("SERVICES & POI") }, shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.LocalGasStation, "Truck services", tint = Color(0xFFFFB56B), modifier = Modifier.size(17.dp)) } }
+                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Wifi, "Wi-Fi status", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
+                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.SignalCellularAlt, "Mobile signal", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
+                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.DataUsage, "Mobile data", tint = Color(0xFFFFB56B), modifier = Modifier.size(17.dp)) } }
             }
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1028,6 +1029,26 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                             color = White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold
                         )
+                    }
+                }
+
+                // Explicit globe/GPS switch: the globe must never trap the camera away from the live position.
+                Surface(
+                    Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 58.dp).height(38.dp).clickable {
+                        if (globeMode) {
+                            globeMode = false
+                            followEnabled = true
+                            mapFollowRequest++
+                        } else {
+                            globeMode = true
+                        }
+                    },
+                    shape = RoundedCornerShape(8.dp), color = Color(0xE9161D23),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+                ) {
+                    Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Icon(if (globeMode) Icons.Default.MyLocation else Icons.Default.Public, null, tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp))
+                        Text(if (globeMode) "GPS" else "GLOBE", color = White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1456,6 +1477,19 @@ private fun updateHaulwayNativeMapOverlays(
                     PropertyFactory.iconIgnorePlacement(true)
                 )
             )
+            // A compact location speech-bubble label stays geographically attached below the GPS arrow.
+            style.addLayer(
+                SymbolLayer("haulway-vehicle-location-label", "haulway-vehicle-source").withProperties(
+                    PropertyFactory.textField("Aktualna lokalizacja"),
+                    PropertyFactory.textSize(11f),
+                    PropertyFactory.textColor("#FFFFFF"),
+                    PropertyFactory.textHaloColor("#14212B"),
+                    PropertyFactory.textHaloWidth(2f),
+                    PropertyFactory.textOffset(arrayOf(0f, 2.2f)),
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true)
+                )
+            )
             HaulwayGpsMarkerAnimation.latitude = latitude
             HaulwayGpsMarkerAnimation.longitude = longitude
         } else {
@@ -1782,25 +1816,6 @@ private fun HaulwayNativeMapCanvas(
             modifier = Modifier.fillMaxSize(),
             factory = { mapView }
         )
-        if (showGlobeControl && false) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopEnd).padding(10.dp)
-                    .clickable { globeMode = !globeMode },
-                shape = RoundedCornerShape(9.dp),
-                color = Color(0xE9161D23),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8)),
-                shadowElevation = 5.dp
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.Public, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
-                    Text(if (globeMode) "MAP" else "GLOBE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
         if (styleError != null) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
