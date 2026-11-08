@@ -1437,15 +1437,11 @@ const root=document.getElementById('map'),scene=document.getElementById('mapscen
 console.log('HAULWAY native tile map script started');
  const CARTO_API_KEY=${JSONObject.quote(BuildConfig.CARTO_API_KEY)};
 window.addEventListener('error',e=>console.error('Map JS error: '+e.message+' line '+e.lineno));
-const cartoProviders=[
- {name:'HAULWAY Dark',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/dark_all/${'$'}{z}/${'$'}{x}/${'$'}{y}.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Voyager',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/rastertiles/voyager/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Light',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/light_all/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'}
-];
-const openStreetMapProvider={name:'OpenStreetMap fallback',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
-/* CARTO requires its own Basemaps key. Do not request CARTO tiles with an empty key:
-   they return HTTP 200 with an API KEY REQUIRED watermark. */
-const providers=CARTO_API_KEY ? [...cartoProviders,openStreetMapProvider] : [openStreetMapProvider];
+const openStreetMapProvider={name:'HAULWAY Landscape',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
+const terrainProvider={name:'HAULWAY Terrain',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.opentopomap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenTopoMap · © OpenStreetMap contributors'};
+const nightProvider={name:'HAULWAY Night',url:(z,x,y)=>CARTO_API_KEY?`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/dark_all/${'$'}{z}/${'$'}{x}/${'$'}{y}.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`:openStreetMapProvider.url(z,x,y),attr:CARTO_API_KEY?'© CARTO · © OpenStreetMap data':'© OpenStreetMap contributors'};
+/* Keep all three layers available even when CARTO credentials are absent. */
+const providers=[nightProvider,openStreetMapProvider,terrainProvider];
 let provider=0,nightHighContrast=false,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=5,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,targetVehicle=null,vehicleAnimFrom=null,vehicleAnimStarted=0,vehicleAnimationFrame=0,autoFollow=true,firstFix=true,headingUp=true,tilt3D=true,drag=null,failed=0,loaded=0,providerTimer=null;
 let requestedZoom=16,globeTransitionStarted=false,globeZoomFrame=0,globeRevealFinished=false,globeIntroStartedAt=0,zoomVisualScale=1,zoomTransitionTimer=0;
 function finishGlobeReveal(){
@@ -1548,7 +1544,7 @@ window.haulwayResize=function(){const s=size();if(s.w>0&&s.h>0){const key=s.w+'x
 const mapResizeObserver=new ResizeObserver(()=>window.haulwayResize());
 mapResizeObserver.observe(root);
 function render(){
- const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=autoFollow?sz.h*.70:sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
+ const generation=++renderGeneration,sz=size(),c=worldPoint(center.lat,center.lon,zoom),anchorY=sz.h*.50,left=c.x-sz.w/2,top=c.y-anchorY;
  renderedCenter={lat:center.lat,lon:center.lon};world.style.left='0px';world.style.top='0px';world.style.transform='none';
  const wanted=new Set(),nextTiles=[];let pending=0,loadedNow=0,failedNow=0;
  const x0=Math.floor(left/256),y0=Math.floor(top/256),x1=Math.floor((left+sz.w-1)/256),y1=Math.floor((top+sz.h-1)/256),max=Math.pow(2,zoom);
@@ -1629,7 +1625,7 @@ function render(){
  providerTimer=setTimeout(()=>{if(generation!==renderGeneration)return;if(pending>0&&loadedNow===0&&provider<providers.length-1){provider++;showStatus('TRYING '+providers[provider].name.toUpperCase()+'…');render();}else if(loadedNow===0){showStatus('MAP UNAVAILABLE — CHECK INTERNET CONNECTION');}},9000);
  finish();drawOverlays();
 }
-function screenPoint(lat,lon){const p=worldPoint(lat,lon,zoom),c=worldPoint(center.lat,center.lon,zoom),s=size();return{x:p.x-c.x+s.w/2,y:p.y-c.y+(autoFollow?s.h*.70:s.h*.50)};}
+function screenPoint(lat,lon){const p=worldPoint(lat,lon,zoom),c=worldPoint(center.lat,center.lon,zoom),s=size();return{x:p.x-c.x+s.w/2,y:p.y-c.y+s.h*.50};}
 function applyMapOrientation(){const camera=tilt3D&&autoFollow?'perspective(1400px) rotateX(32deg) scale(1.62)':'';const zoomScale=zoomVisualScale!==1?' scale('+zoomVisualScale+')':'';scene.style.transform=(camera+zoomScale)||'none';scene.style.transformOrigin='50% 50%';scene.style.perspective='none';if(lastVehicle&&Number.isFinite(lastVehicle.bearing)){vehicle.style.transform=headingUp?`rotate(${'$'}{lastVehicle.bearing}deg)`:'rotate(0deg)';}else{vehicle.style.transform='rotate(0deg)';}}
 let lastStreetLookupAt=0,lastStreetLookupPoint=null,streetLookupBusy=false;
  function refreshStreetName(lat,lon){
@@ -1643,7 +1639,7 @@ let lastStreetLookupAt=0,lastStreetLookupPoint=null,streetLookupBusy=false;
    .catch(()=>{streetBubble.style.display='none';})
    .finally(()=>{streetLookupBusy=false;});
  }
- function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.70}:screenPoint(lastVehicle.lat,lastVehicle.lon);const panX=(typeof panOffset!=='undefined'?panOffset.x:0),panY=(typeof panOffset!=='undefined'?panOffset.y:0);vehicle.style.display='block';vehicle.style.left=(p.x+panX)+'px';vehicle.style.top=(p.y+panY)+'px';if(streetBubble.textContent.trim()){streetBubble.style.display='block';streetBubble.style.visibility='visible';streetBubble.style.left=(p.x+panX)+'px';streetBubble.style.top=(p.y+panY+30)+'px';}}applyMapOrientation();drawRoadMarkers();refreshRoadData(); }
+ function drawOverlays(){const s=size();overlay.setAttribute('viewBox',`0 0 ${'$'}{s.w} ${'$'}{s.h}`);for(const id of ['routecasing','route'])document.getElementById(id).setAttribute('points',routeCoords.map(c=>{const p=screenPoint(c[0],c[1]);return `${'$'}{p.x},${'$'}{p.y}`}).join(' '));const start=document.getElementById('routeStart'),end=document.getElementById('routeEnd');if(routeCoords.length>1){const a=screenPoint(routeCoords[0][0],routeCoords[0][1]),b=screenPoint(routeCoords[routeCoords.length-1][0],routeCoords[routeCoords.length-1][1]);start.setAttribute('cx',a.x);start.setAttribute('cy',a.y);end.setAttribute('cx',b.x);end.setAttribute('cy',b.y);start.style.display='block';end.style.display='block';}else{start.style.display='none';end.style.display='none';}if(lastVehicle){const p=autoFollow?{x:s.w/2,y:s.h*.50}:screenPoint(lastVehicle.lat,lastVehicle.lon);const panX=(typeof panOffset!=='undefined'?panOffset.x:0),panY=(typeof panOffset!=='undefined'?panOffset.y:0);vehicle.style.display='block';vehicle.style.left=(p.x+panX)+'px';vehicle.style.top=(p.y+panY)+'px';if(streetBubble.textContent.trim()){streetBubble.style.display='block';streetBubble.style.visibility='visible';streetBubble.style.left=(p.x+panX)+'px';streetBubble.style.top=(p.y+panY+30)+'px';}}applyMapOrientation();drawRoadMarkers();refreshRoadData(); }
 function setCenter(lat,lon,follow=false){center={lat:clamp(lat,-85,85),lon:lon};if(follow)autoFollow=true;render();}
 function animateZoomTo(targetZoom){
  targetZoom=clamp(Math.round(targetZoom),3,19);
@@ -1703,7 +1699,7 @@ window.haulwaySetVehicleLocation=function(lat,lon,bearing,accuracy){
  refreshStreetName(lat,lon);
  if(!lastVehicle){
    lastVehicle=next;targetVehicle=next;vehicleAnimFrom=next;
-   if(autoFollow){center={lat:clamp(lat,-85,85),lon};if(firstFix){firstFix=false;animateGlobeToLocation();}}
+   if(autoFollow){center={lat:clamp(lat,-85,85),lon};if(firstFix){firstFix=false;setTimeout(()=>{if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};animateGlobeToLocation();}},5000);}}
    scheduleRender();drawOverlays();return;
  }
  targetVehicle=next;
@@ -1715,21 +1711,20 @@ window.haulwaySetFollowMode=function(enabled){userPannedMap=!enabled;autoFollow=
 window.haulwaySetTilt3D=function(enabled){tilt3D=!!enabled;applyMapOrientation();};
 window.haulwayApplyAppearance=function(mode,style){
  const isNight=mode==='Night'||(mode==='Auto'&&(new Date().getHours()>=19||new Date().getHours()<7));
- const target=isNight?2:(mode==='Day'?1:1);
+ const target=isNight?0:1;
  const nextNight=isNight;
  const changed=provider!==target||nightHighContrast!==nextNight;
  provider=target;nightHighContrast=nextNight;
  if(changed){
   const attr=document.querySelector('.attribution');
-  if(attr)attr.textContent=providers[provider].attr+' · '+(nightHighContrast?'HAULWAY Night High Contrast':providers[provider].name);
-  showStatus(nightHighContrast?'LOADING NIGHT HIGH-CONTRAST MAP…':'LOADING '+providers[provider].name.toUpperCase()+'…');
+  if(attr)attr.textContent=providers[provider].attr+' · '+providers[provider].name;
+  showStatus('LOADING '+providers[provider].name.toUpperCase()+'…');
   render();
  }
 };
 window.haulwaySetMapStyleRequest=function(){
- if(!CARTO_API_KEY){showStatus('CARTO API KEY MISSING — ADD CARTO_API_KEY TO local.properties OR GITHUB SECRET');console.warn('Layers unavailable: CARTO_API_KEY was empty at build time');return;}
- // The Layers control cycles only the three CARTO basemaps. OSM is fallback-only.
- provider=(provider+1)%cartoProviders.length;
+ provider=(provider+1)%providers.length;
+ nightHighContrast=provider===0;
  const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[provider].attr+' · '+providers[provider].name;
  showStatus('LOADING '+providers[provider].name.toUpperCase()+'…');render();
 };
