@@ -1139,6 +1139,50 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         }
                     }
                 }
+                selectedMapSearchPlace?.let { place ->
+                    MapSelectedPlaceCard(
+                        place = place,
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+                        onClose = { selectedMapSearchPlace = null; selectedMapSearchLocation = null },
+                        onSave = {
+                            val prefs = appContext.getSharedPreferences("haulway_saved_places", Context.MODE_PRIVATE)
+                            val raw = prefs.getString("items", null)
+                            val existing = try {
+                                val array = org.json.JSONArray(raw ?: "[]")
+                                (0 until array.length()).map { index ->
+                                    val item = array.getJSONObject(index)
+                                    item.optString("name") to item.optString("address")
+                                }
+                            } catch (_: Exception) { emptyList() }
+                            savePlaces(prefs, (existing + (place.name to place.name)).distinctBy { it.second.lowercase(Locale.UK) })
+                            Toast.makeText(appContext, "Saved to MY PLACES", Toast.LENGTH_SHORT).show()
+                        },
+                        onGo = {
+                            mapSearchScope.launch {
+                                try {
+                                    check(liveLatitude != null && liveLongitude != null) { "GPS position is not ready yet." }
+                                    val calculated = calculateRoadRoute(listOf("CURRENT LOCATION", place.name), "FASTEST", appContext)
+                                    RoutePlanStore.coordinatesJson = calculated.coordinatesJson
+                                    RoutePlanStore.summary = calculated.distanceText + " · " + calculated.durationText
+                                    RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
+                                    RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
+                                    remainingDistanceMetres = calculated.totalDistanceMetres
+                                    remainingDurationSeconds = calculated.totalDurationSeconds
+                                    RoutePlanStore.steps = calculated.steps
+                                    RoutePlanStore.maneuvers = calculated.maneuvers
+                                    RoutePlanStore.origin = "CURRENT LOCATION"
+                                    RoutePlanStore.destination = place.name
+                                    selectedMapSearchPlace = null
+                                    selectedMapSearchLocation = null
+                                    followEnabled = true
+                                } catch (error: Exception) {
+                                    Toast.makeText(appContext, error.localizedMessage ?: "Could not calculate HGV route", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    )
+                }
+
                 // The live vehicle marker is drawn by the map only after a real GPS fix.
             }
 
@@ -1321,6 +1365,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                         Modifier.fillMaxWidth().clickable {
                                             selectedMapSearchPlace = place
                                             selectedMapSearchLocation = place.latitude to place.longitude
+                                            showMapSearch = false
                                         },
                                         color = Color(0xB826333D), shape = RoundedCornerShape(7.dp)
                                     ) {
@@ -1422,6 +1467,50 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     }
 }
 
+
+
+@Composable
+private fun MapSelectedPlaceCard(
+    place: MapSearchResult,
+    modifier: Modifier = Modifier,
+    onClose: () -> Unit,
+    onSave: () -> Unit,
+    onGo: () -> Unit
+) {
+    Surface(
+        modifier = modifier.widthIn(max = 285.dp),
+        color = Color(0xE817232C),
+        shape = RoundedCornerShape(11.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8)),
+        shadowElevation = 12.dp
+    ) {
+        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(place.name, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 2, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.Close, contentDescription = "Close place preview", tint = Color.White,
+                    modifier = Modifier.size(20.dp).clickable { onClose() })
+            }
+            GoogleStreetViewPreview(place.latitude, place.longitude, Modifier.fillMaxWidth().height(112.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = onSave, modifier = Modifier.weight(1f).height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF344654))) {
+                    Icon(Icons.Default.BookmarkAdd, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("SAVE LOCATION", fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(onClick = onGo, modifier = Modifier.weight(1f).height(36.dp),
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF087CCB))) {
+                    Icon(Icons.Default.Navigation, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(3.dp))
+                    Text("GO", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun GoogleStreetViewPreview(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
