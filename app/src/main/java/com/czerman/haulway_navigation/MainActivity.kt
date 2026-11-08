@@ -1795,7 +1795,6 @@ private fun MapQuickActionCard(icon: ImageVector, title: String, subtitle: Strin
     }
 }
 
-@Composable
 private fun pointAheadOnRoute(latitude: Double, longitude: Double, routeJson: String, distanceAheadMetres: Double): Pair<Double, Double>? {
     return try {
         val points = org.json.JSONArray(routeJson)
