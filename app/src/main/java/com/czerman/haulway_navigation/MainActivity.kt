@@ -465,15 +465,15 @@ class MainActivity : ComponentActivity() {
 
     private fun enableImmersiveMode() {
         @Suppress("DEPRECATION")
+        // Keep Android's real status bar visible (Wi-Fi, mobile signal, data and battery).
+        // Only hide the navigation bar; do not draw HAULWAY fake status icons.
         window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        or View.SYSTEM_UI_FLAG_FULLSCREEN
                         or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 )
-        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.statusBarColor = android.graphics.Color.rgb(8, 14, 19)
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
     }
 
@@ -970,11 +970,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             Spacer(Modifier.weight(1f))
             Text(clockText, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Wifi, "Wi-Fi status", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
-                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.SignalCellularAlt, "Mobile signal", tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp)) } }
-                Surface(Modifier.size(28.dp), shape = RoundedCornerShape(7.dp), color = Color(0xE9161D23)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.DataUsage, "Mobile data", tint = Color(0xFFFFB56B), modifier = Modifier.size(17.dp)) } }
-            }
+
         }
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
@@ -1457,19 +1453,6 @@ private fun updateHaulwayNativeMapOverlays(
                     PropertyFactory.iconIgnorePlacement(true)
                 )
             )
-            // A compact location speech-bubble label stays geographically attached below the GPS arrow.
-            style.addLayer(
-                SymbolLayer("haulway-vehicle-location-label", "haulway-vehicle-source").withProperties(
-                    PropertyFactory.textField("Aktualna lokalizacja"),
-                    PropertyFactory.textSize(11f),
-                    PropertyFactory.textColor("#FFFFFF"),
-                    PropertyFactory.textHaloColor("#14212B"),
-                    PropertyFactory.textHaloWidth(2f),
-                    PropertyFactory.textOffset(arrayOf(0f, 2.2f)),
-                    PropertyFactory.textAllowOverlap(true),
-                    PropertyFactory.textIgnorePlacement(true)
-                )
-            )
             HaulwayGpsMarkerAnimation.latitude = latitude
             HaulwayGpsMarkerAnimation.longitude = longitude
         } else {
@@ -1663,6 +1646,14 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
+    // The map's existing recenter/GPS control also exits globe mode before flying to the live fix.
+    LaunchedEffect(followRequest) {
+        if (followRequest > 0) {
+            globeMode = false
+            forceGpsRecenter = true
+        }
+    }
+
     // Load the basemap once. The native globe projection automatically blends into
     // Mercator as the camera zooms in, so changing projection must not reload the style.
     LaunchedEffect(mapLibreMap, activeStyleUrl) {
@@ -1798,23 +1789,6 @@ private fun HaulwayNativeMapCanvas(
             modifier = Modifier.fillMaxSize(),
             factory = { mapView }
         )
-        Surface(
-            Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 10.dp).height(38.dp).clickable {
-                if (globeMode) {
-                    globeMode = false
-                    forceGpsRecenter = true
-                } else {
-                    globeMode = true
-                }
-            },
-            shape = RoundedCornerShape(8.dp), color = Color(0xE9161D23),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
-        ) {
-            Row(Modifier.padding(horizontal = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(if (globeMode) Icons.Default.MyLocation else Icons.Default.Public, null, tint = Color(0xFFBDE8FF), modifier = Modifier.size(17.dp))
-                Text(if (globeMode) "GPS" else "GLOBE", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-        }
         if (styleError != null) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp),
