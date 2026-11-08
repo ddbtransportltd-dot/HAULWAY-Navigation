@@ -22,11 +22,17 @@ val cartoApiKey = secret("CARTO_API_KEY")
 val tomtomTrafficApiKey = secret("TOMTOM_TRAFFIC_API_KEY")
 val googleMapsJavaScriptApiKey = sequenceOf(
     localSecrets.getProperty("GOOGLE_STREETVIEW_API_KEY"),
+    localSecrets.getProperty("GOOGLE_STREET_VIEW_API_KEY"),
     localSecrets.getProperty("GOOGLE_MAPS_API_KEY"),
+    localSecrets.getProperty("GOOGLE_API_KEY"),
     providers.gradleProperty("GOOGLE_STREETVIEW_API_KEY").orNull,
+    providers.gradleProperty("GOOGLE_STREET_VIEW_API_KEY").orNull,
     providers.gradleProperty("GOOGLE_MAPS_API_KEY").orNull,
+    providers.gradleProperty("GOOGLE_API_KEY").orNull,
     System.getenv("GOOGLE_STREETVIEW_API_KEY"),
-    System.getenv("GOOGLE_MAPS_API_KEY")
+    System.getenv("GOOGLE_STREET_VIEW_API_KEY"),
+    System.getenv("GOOGLE_MAPS_API_KEY"),
+    System.getenv("GOOGLE_API_KEY")
 ).firstOrNull { !it.isNullOrBlank() }?.trim().orEmpty()
 val mapillaryAccessToken = sequenceOf(
     localSecrets.getProperty("MAPILLARY_ACCESS_TOKEN"),
