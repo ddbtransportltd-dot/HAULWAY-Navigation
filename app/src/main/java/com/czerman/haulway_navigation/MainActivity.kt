@@ -1518,7 +1518,7 @@ private fun GoogleStreetViewPreview(latitude: Double, longitude: Double, modifie
         value = null to "LOADING STREET VIEW…"
         val key = BuildConfig.GOOGLE_MAPS_API_KEY
         if (key.isBlank()) {
-            value = null to "GOOGLE STREET VIEW KEY REQUIRED"
+            value = null to "GOOGLE MAPS API KEY NOT INCLUDED IN THIS APK — CHECK GITHUB SECRET"
             return@produceState
         }
         value = withContext(Dispatchers.IO) {
@@ -2015,9 +2015,10 @@ private fun HaulwayNativeMapCanvas(
 
     LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver) {
         val map = mapLibreMap ?: return@LaunchedEffect
-        // Place the live vehicle marker about 75% down the map viewport, leaving
-        // roughly three quarters of the forward view visible above it.
-        val topCameraPadding = (mapView.height * 0.5f).toInt().coerceAtLeast(0)
+        // The globe must use the full, symmetric viewport. The forward-view camera
+        // offset belongs only to turn-by-turn driving mode; applying it to the globe
+        // shifts the entire planet below the centre of the screen.
+        val topCameraPadding = if (globeMode) 0 else (mapView.height * 0.5f).toInt().coerceAtLeast(0)
         map.setPadding(0, topCameraPadding, 0, 0)
         val camera = if (globeMode) {
             CameraPosition.Builder()
@@ -2031,7 +2032,9 @@ private fun HaulwayNativeMapCanvas(
             val currentCamera = map.cameraPosition
             val shouldFollowGps = searchLocation == null && hasGps && (followEnabled || forceGpsRecenter)
             val target = searchLocation?.let { LatLng(it.first, it.second) } ?: if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
-            val baseZoom = if (searchLocation != null) 16.5 else if (shouldFollowGps) (15.0 + zoom.toDouble()) else currentCamera.zoom
+            // A globe-to-GPS transition should land at a useful street-level zoom,
+            // even when the user has not touched the manual zoom controls.
+            val baseZoom = if (searchLocation != null) 16.5 else if (shouldFollowGps) (16.0 + zoom.toDouble()) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
