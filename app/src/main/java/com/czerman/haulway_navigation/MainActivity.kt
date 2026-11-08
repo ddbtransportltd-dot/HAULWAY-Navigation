@@ -1085,7 +1085,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 }
                 if (liveLatitude != null && liveLongitude != null) {
                     Surface(
-                        Modifier.align(Alignment.Center).offset(y = 48.dp),
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp),
                         shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))
                     ) {
@@ -1772,6 +1772,10 @@ private fun HaulwayNativeMapCanvas(
 
     LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver, activeManeuverIndex) {
         val map = mapLibreMap ?: return@LaunchedEffect
+        // Place the live vehicle marker about 75% down the map viewport, leaving
+        // roughly three quarters of the forward view visible above it.
+        val topCameraPadding = (mapView.height * 0.5f).toInt().coerceAtLeast(0)
+        map.setPadding(0, topCameraPadding, 0, 0)
         val camera = if (globeMode) {
             CameraPosition.Builder()
                 .target(LatLng(15.0, 0.0))
