@@ -1142,7 +1142,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         Box(contentAlignment = Alignment.Center) { Text(if (tilt3D) "3D" else "2D", color = White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
                     }
                     Surface(Modifier.size(38.dp).clickable { showRouteAvoidDialog = true }, shape = RoundedCornerShape(8.dp), color = panel) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.EditRoad, "Route restrictions and road avoidance", tint = Color(0xFFFFB15C)) }
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Route, "Route restrictions and road avoidance", tint = Color(0xFFFFB15C)) }
                     }
                     Surface(Modifier.size(38.dp).clickable { zoom = (zoom + 1).coerceAtMost(6) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, "Zoom in", tint = White) }
@@ -1326,7 +1326,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.EditRoad, null, tint = Color(0xFFFFB15C))
+                        Icon(Icons.Default.Route, null, tint = Color(0xFFFFB15C))
                         Spacer(Modifier.width(9.dp))
                         Text("ROUTE & ROAD CONTROLS", color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f))
@@ -1837,7 +1837,7 @@ private fun LaneGuidanceCard(instruction: String, roadName: String, distance: St
     ) {
         Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Signpost, null, tint = Color(0xFF8BD5FF), modifier = Modifier.size(15.dp))
+                Icon(Icons.Default.Navigation, null, tint = Color(0xFF8BD5FF), modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(5.dp))
                 Text("LANE & EXIT GUIDANCE", color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                 Text(distance, color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
