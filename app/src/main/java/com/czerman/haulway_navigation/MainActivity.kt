@@ -1197,6 +1197,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     RoutePlanStore.maneuvers = calculated.maneuvers
                                     RoutePlanStore.origin = "CURRENT LOCATION"
                                     RoutePlanStore.destination = place.name
+                                    RoutePlanStore.avoidPoints = emptyList()
                                     selectedMapSearchPlace = null
                                     selectedMapSearchLocation = null
                                     followEnabled = true
@@ -1319,12 +1320,12 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     if (showRouteAvoidDialog) {
         Dialog(onDismissRequest = { if (!avoidActionBusy) showRouteAvoidDialog = false }) {
             Surface(
-                modifier = Modifier.fillMaxWidth(0.94f),
+                modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.9f),
                 color = Color(0xFF111B23),
                 shape = RoundedCornerShape(16.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF40586A))
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Route, null, tint = Color(0xFFFFB15C))
                         Spacer(Modifier.width(9.dp))
@@ -1436,6 +1437,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             onClick = {
                                 if (avoidRoadText.isBlank()) {
                                     Toast.makeText(appContext, "Enter the road or junction to block.", Toast.LENGTH_SHORT).show()
+                                } else if (RoutePlanStore.coordinatesJson == null || RoutePlanStore.destination.isBlank()) {
+                                    Toast.makeText(appContext, "Start a route before blocking a road.", Toast.LENGTH_LONG).show()
                                 } else {
                                     avoidActionBusy = true
                                     mapSearchScope.launch {
@@ -1652,6 +1655,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                                 RoutePlanStore.maneuvers = calculated.maneuvers
                                                 RoutePlanStore.origin = "CURRENT LOCATION"
                                                 RoutePlanStore.destination = previewPlace.name
+                                                RoutePlanStore.avoidPoints = emptyList()
                                                 showMapSearch = false
                                                 selectedMapSearchPlace = null
                                                 selectedMapSearchLocation = null
@@ -3169,6 +3173,7 @@ private fun RoutePlannerPanel(onRouteReady: () -> Unit, modifier: Modifier = Mod
                                 RoutePlanStore.steps = calculated.steps
                                 RoutePlanStore.maneuvers = calculated.maneuvers
                                 RoutePlanStore.origin = stops.first(); RoutePlanStore.destination = stops.last()
+                                RoutePlanStore.avoidPoints = emptyList()
                                 result = calculated
                             } catch (e: Exception) { error = e.localizedMessage ?: "Could not calculate route" }
                             finally { loading = false }
