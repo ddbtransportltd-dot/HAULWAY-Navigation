@@ -1356,6 +1356,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                             RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
                                             RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
                                             RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            remainingDistanceMetres = updated.totalDistanceMetres
+                                            remainingDurationSeconds = updated.totalDurationSeconds
                                             RoutePlanStore.maneuvers = updated.maneuvers
                                             RoutePlanStore.steps = updated.steps
                                             activeManeuverIndex = 0
@@ -1418,6 +1420,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                             RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
                                             RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
                                             RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            remainingDistanceMetres = updated.totalDistanceMetres
+                                            remainingDurationSeconds = updated.totalDurationSeconds
                                             RoutePlanStore.maneuvers = updated.maneuvers
                                             RoutePlanStore.steps = updated.steps
                                             activeManeuverIndex = 0
@@ -1456,6 +1460,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                             RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
                                             RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
                                             RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            remainingDistanceMetres = updated.totalDistanceMetres
+                                            remainingDurationSeconds = updated.totalDurationSeconds
                                             RoutePlanStore.maneuvers = updated.maneuvers
                                             RoutePlanStore.steps = updated.steps
                                             activeManeuverIndex = 0
@@ -1488,6 +1494,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                         RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
                                         RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
                                         RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            remainingDistanceMetres = updated.totalDistanceMetres
+                                            remainingDurationSeconds = updated.totalDurationSeconds
                                         RoutePlanStore.maneuvers = updated.maneuvers
                                         RoutePlanStore.steps = updated.steps
                                         activeManeuverIndex = 0
