@@ -44,8 +44,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 27
-        versionName = "2.2.3-vision22-gps-statusbar-fix"
+        versionCode = 28
+        versionName = "2.2.4-vision22-map-framing-maneuver-zoom"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
