@@ -1770,7 +1770,7 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver, activeManeuverIndex) {
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver) {
         val map = mapLibreMap ?: return@LaunchedEffect
         // Place the live vehicle marker about 75% down the map viewport, leaving
         // roughly three quarters of the forward view visible above it.
@@ -1796,10 +1796,9 @@ private fun HaulwayNativeMapCanvas(
                 distanceToManeuver < 800.0 -> 0.8
                 else -> 0.0
             }
-            val activeManeuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.label?.lowercase(Locale.UK).orEmpty()
-            val isComplexTurn = listOf("roundabout", "left", "right", "turn", "u-turn", "u turn", "junction", "exit").any { activeManeuver.contains(it) }
+            // Increase zoom progressively as the next manoeuvre gets closer.
             val approachZoom = when {
-                distanceToManeuver == null || !isComplexTurn -> 0.0
+                distanceToManeuver == null -> 0.0
                 distanceToManeuver < 250.0 -> 2.8
                 distanceToManeuver < 600.0 -> 2.0
                 distanceToManeuver < 1100.0 -> 1.2
