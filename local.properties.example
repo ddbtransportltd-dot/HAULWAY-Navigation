@@ -2,6 +2,7 @@
 # Keep your SDK path and add your own keys; never commit local.properties.
 sdk.dir=C\\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
 ORS_API_KEY=
+TOMTOM_TRAFFIC_API_KEY=
 CARTO_API_KEY=
 GOOGLE_STREETVIEW_API_KEY=
 MAPILLARY_ACCESS_TOKEN=
