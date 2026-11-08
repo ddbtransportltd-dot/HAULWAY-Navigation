@@ -626,7 +626,7 @@ private fun maneuverIconFor(instruction: String): ImageVector {
 private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     val appContext: Context = LocalContext.current
     val mapSearchScope = rememberCoroutineScope()
-    var zoom by remember { mutableIntStateOf(0) }
+    var zoom by remember { mutableIntStateOf(-1) }
     var showMapSearch by remember { mutableStateOf(false) }
     var mapSearchText by remember { mutableStateOf("") }
     var mapSearchResults by remember { mutableStateOf<List<MapSearchResult>>(emptyList()) }
@@ -3456,7 +3456,7 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
                 }
                 incidents.filter { incident ->
                     incident.geometrySegments.flatten().any { point ->
-                        distanceToRouteMetres(point.first, point.second) <= 180.0
+                        distanceToRouteMetres(point.first, point.second) <= 75.0
                     }
                 }
             } else incidents
