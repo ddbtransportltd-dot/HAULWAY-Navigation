@@ -446,13 +446,13 @@ class MainActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        or View.SYSTEM_UI_FLAG_FULLSCREEN
                         or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 )
-        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        // Keep Android's real status bar visible so Wi-Fi, mobile signal and battery
+        // indicators remain available above the navigation workspace.
+        window.statusBarColor = android.graphics.Color.rgb(11, 17, 23)
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
     }
 
@@ -976,11 +976,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     .background(Color(0xFF0B1117)).padding(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Row(Modifier.fillMaxWidth().height(22.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.SignalCellularAlt, null, tint = Color.LightGray, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(5.dp)); Icon(Icons.Default.Wifi, null, tint = Color.LightGray, modifier = Modifier.size(12.dp))
-                    Spacer(Modifier.width(5.dp)); Icon(Icons.Default.BatteryFull, null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
-                }
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
                     val maneuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)
                     if (maneuver != null) {
