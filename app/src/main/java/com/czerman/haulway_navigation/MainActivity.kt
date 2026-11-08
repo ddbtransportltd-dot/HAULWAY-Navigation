@@ -650,6 +650,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var lastSpeedLimitFetchLon by remember { mutableStateOf<Double?>(null) }
     var liveLatitude by remember { mutableStateOf<Double?>(null) }
     var liveLongitude by remember { mutableStateOf<Double?>(null) }
+    var currentPlaceName by remember { mutableStateOf("Ustalanie lokalizacji…") }
     var liveBearing by remember { mutableStateOf<Float?>(null) }
     var liveAccuracy by remember { mutableStateOf<Float?>(null) }
     var activeManeuverIndex by remember { mutableIntStateOf(0) }
@@ -675,9 +676,28 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             speechReady = false
         }
     }
-    LaunchedEffect(liveLatitude, liveLongitude) {
+    LaunchedEffect(liveLatitude?.let { (it * 1000).toInt() }, liveLongitude?.let { (it * 1000).toInt() }) {
         val lat = liveLatitude ?: return@LaunchedEffect
         val lon = liveLongitude ?: return@LaunchedEffect
+        currentPlaceName = withContext(Dispatchers.IO) {
+            runCatching {
+                val url = URL("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$lat&lon=$lon&zoom=18&addressdetails=1")
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    setRequestProperty("User-Agent", "HAULWAY-Navigation/2.2 (Android navigation)")
+                    connectTimeout = 7000
+                    readTimeout = 7000
+                }
+                try {
+                    val result = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                    val address = result.optJSONObject("address") ?: JSONObject()
+                    listOf("road", "pedestrian", "residential", "neighbourhood", "suburb", "town", "city", "village", "county")
+                        .firstNotNullOfOrNull { key -> address.optString(key).takeIf { it.isNotBlank() && it != "null" } }
+                        ?: result.optString("name").takeIf { it.isNotBlank() }
+                        ?: "Aktualna pozycja"
+                } finally { connection.disconnect() }
+            }.getOrElse { currentPlaceName.takeIf { it != "Ustalanie lokalizacji…" } ?: "Aktualna pozycja" }
+        }
         val now = System.currentTimeMillis()
         val previousLat = lastSpeedLimitFetchLat
         val previousLon = lastSpeedLimitFetchLon
@@ -980,7 +1000,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
                     // Keep SEARCH below the manoeuvre banner so it is never hidden behind it.
-                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 68.dp).size(44.dp).clickable {
+                    Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp).size(44.dp).clickable {
                         showMapSearch = true
                         mapSearchError = null
                         selectedMapSearchLocation = null
@@ -1059,20 +1079,20 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Surface(Modifier.size(38.dp).clickable { zoom = (zoom + 1).coerceAtMost(6) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, "Zoom in", tint = White) }
                     }
-                    Surface(Modifier.size(38.dp).clickable { zoom = (zoom - 1).coerceAtLeast(-5) }, shape = RoundedCornerShape(8.dp), color = panel) {
+                    Surface(Modifier.size(38.dp).clickable { zoom = (zoom - 2).coerceAtLeast(-5) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Text("−", color = White, fontSize = 27.sp, fontWeight = FontWeight.Medium) }
                     }
                 }
                 if (liveLatitude != null && liveLongitude != null) {
                     Surface(
-                        Modifier.align(Alignment.CenterStart).padding(start = 12.dp, top = 80.dp),
+                        Modifier.align(Alignment.Center).offset(y = 48.dp),
                         shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF526575))
                     ) {
                         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.LocationOn, null, tint = Color(0xFF58B9F2), modifier = Modifier.size(13.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(String.format(Locale.UK, "%.5f, %.5f", liveLatitude, liveLongitude), color = White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Text(currentPlaceName, color = White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         }
                     }
                 }
@@ -1750,7 +1770,7 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver) {
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver, activeManeuverIndex) {
         val map = mapLibreMap ?: return@LaunchedEffect
         val camera = if (globeMode) {
             CameraPosition.Builder()
@@ -1772,7 +1792,17 @@ private fun HaulwayNativeMapCanvas(
                 distanceToManeuver < 800.0 -> 0.8
                 else -> 0.0
             }
-            val targetZoom = (baseZoom + maneuverZoom).coerceAtMost(16.0)
+            val activeManeuver = RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.label?.lowercase(Locale.UK).orEmpty()
+            val isComplexTurn = listOf("roundabout", "left", "right", "turn", "u-turn", "u turn", "junction", "exit").any { activeManeuver.contains(it) }
+            val approachZoom = when {
+                distanceToManeuver == null || !isComplexTurn -> 0.0
+                distanceToManeuver < 250.0 -> 2.8
+                distanceToManeuver < 600.0 -> 2.0
+                distanceToManeuver < 1100.0 -> 1.2
+                distanceToManeuver < 1600.0 -> 0.5
+                else -> 0.0
+            }
+            val targetZoom = (baseZoom + maxOf(maneuverZoom, approachZoom)).coerceAtMost(17.0)
             CameraPosition.Builder()
                 .target(target)
                 .zoom(targetZoom)
