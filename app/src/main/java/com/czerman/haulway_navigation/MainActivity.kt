@@ -713,7 +713,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         lastSpeedLimitFetchLon = lon
         liveSpeedLimitMph = withContext(Dispatchers.IO) {
             runCatching {
-                val query = "[out:json][timeout:10];(way(around:80,$lat,$lon)[highway][maxspeed:hgv];way(around:80,$lat,$lon)[highway][maxspeed];);out geom tags;
+                val query = "[out:json][timeout:10];way(around:80,$lat,$lon)[highway];out geom tags;"
                 val url = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 5000
@@ -728,9 +728,35 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     for (index in 0 until elements.length()) {
                         val item = elements.optJSONObject(index) ?: continue
                         val tags = item.optJSONObject("tags") ?: continue
-                        val raw = tags.optString("maxspeed:hgv", "").ifBlank { tags.optString("maxspeed", "") }.lowercase(Locale.UK)
-                        val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value?.toDoubleOrNull() ?: continue
-                        val mph = if (raw.contains("km/h") || raw.contains("kph")) number * 0.621371 else number
+                        val hgvRaw = tags.optString("maxspeed:hgv", "").trim().lowercase(Locale.UK)
+                        val raw = hgvRaw.ifBlank { tags.optString("maxspeed", "").trim().lowercase(Locale.UK) }
+                        val highway = tags.optString("highway", "").lowercase(Locale.UK)
+                        val dual = tags.optString("dual_carriageway").equals("yes", true) ||
+                            tags.optString("divided").equals("yes", true) ||
+                            (tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2)
+                        val numeric = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value?.toDoubleOrNull()
+                        val parsedMph = when {
+                            "nsl_single" in raw -> 40.0
+                            "nsl_dual" in raw -> 50.0
+                            "motorway" in raw -> 60.0
+                            "living_street" in raw -> 20.0
+                            "urban" in raw || "restricted" in raw -> 30.0
+                            numeric != null && (raw.contains("km/h") || raw.contains("kph")) -> numeric * 0.621371
+                            numeric != null -> numeric
+                            else -> null
+                        }
+                        val statutoryHgvDefault = when (highway) {
+                            "motorway" -> 60.0
+                            "motorway_link" -> 40.0
+                            "living_street" -> 20.0
+                            "residential" -> 30.0
+                            "trunk", "primary", "secondary", "tertiary", "unclassified" -> if (dual) 50.0 else 40.0
+                            else -> null
+                        }
+                        val mph = if (hgvRaw.isNotBlank()) parsedMph
+                            else if (statutoryHgvDefault != null) minOf(parsedMph ?: statutoryHgvDefault, statutoryHgvDefault)
+                            else parsedMph
+                        if (mph == null) continue
                         val geometry = item.optJSONArray("geometry") ?: continue
                         var wayDistance = Double.MAX_VALUE
                         var previousX: Double? = null
@@ -994,6 +1020,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp).size(44.dp).clickable {
                         showMapSearch = true
                         mapSearchError = null
+                        selectedMapSearchPlace = null
                         selectedMapSearchLocation = null
                     },
                     shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
