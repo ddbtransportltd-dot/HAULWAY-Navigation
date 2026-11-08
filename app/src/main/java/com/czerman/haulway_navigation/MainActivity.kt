@@ -136,6 +136,7 @@ private object RoutePlanStore {
     var maneuvers by mutableStateOf<List<RouteManeuver>>(emptyList())
     var origin by mutableStateOf("")
     var destination by mutableStateOf("")
+    var avoidPoints by mutableStateOf<List<Pair<Double, Double>>>(emptyList())
     var totalDistanceMetres by mutableStateOf(0.0)
     var totalDurationSeconds by mutableStateOf(0.0)
 }
@@ -260,7 +261,8 @@ private suspend fun calculateRoadRoute(
     locations: List<String>,
     strategy: String,
     context: Context,
-    liveOrigin: Pair<Double, Double>? = null
+    liveOrigin: Pair<Double, Double>? = null,
+    avoidPoints: List<Pair<Double, Double>> = emptyList()
 ): RouteResult = withContext(Dispatchers.IO) {
     require(locations.size >= 2) { "Add at least a start and destination" }
     val apiKey = BuildConfig.ORS_API_KEY.trim()
@@ -346,6 +348,22 @@ private suspend fun calculateRoadRoute(
         put("profile_params", JSONObject().put("restrictions", restrictions))
         if (strategy == "AVOID") {
             put("avoid_features", org.json.JSONArray().put("ferries").put("tollways"))
+        }
+        if (avoidPoints.isNotEmpty()) {
+            // ORS avoid_polygons uses GeoJSON MultiPolygon coordinates in [lon, lat] order.
+            val polygons = org.json.JSONArray()
+            avoidPoints.forEach { (lat, lon) ->
+                val dLat = 0.0022
+                val dLon = 0.0028 / kotlin.math.cos(Math.toRadians(lat)).coerceAtLeast(0.2)
+                val ring = org.json.JSONArray()
+                    .put(org.json.JSONArray().put(lon - dLon).put(lat - dLat))
+                    .put(org.json.JSONArray().put(lon + dLon).put(lat - dLat))
+                    .put(org.json.JSONArray().put(lon + dLon).put(lat + dLat))
+                    .put(org.json.JSONArray().put(lon - dLon).put(lat + dLat))
+                    .put(org.json.JSONArray().put(lon - dLon).put(lat - dLat))
+                polygons.put(org.json.JSONArray().put(ring))
+            }
+            put("avoid_polygons", JSONObject().put("type", "MultiPolygon").put("coordinates", polygons))
         }
     }
     val requestBody = JSONObject().apply {
@@ -636,6 +654,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var selectedMapSearchPlace by remember { mutableStateOf<MapSearchResult?>(null) }
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
+    var showRouteAvoidDialog by remember { mutableStateOf(false) }
+    var avoidRoadText by remember { mutableStateOf("") }
+    var avoidActionBusy by remember { mutableStateOf(false) }
     var headingUp by remember { mutableStateOf(true) }
     var followEnabled by remember { mutableStateOf(true) }
     var tilt3D by remember { mutableStateOf(true) }
@@ -912,7 +933,8 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             try {
                                 val updated = calculateRoadRoute(
                                     listOf("CURRENT LOCATION", RoutePlanStore.destination),
-                                    "FASTEST", appContext, location.longitude to location.latitude
+                                    "FASTEST", appContext, location.longitude to location.latitude,
+                                    RoutePlanStore.avoidPoints
                                 )
                                 RoutePlanStore.coordinatesJson = updated.coordinatesJson
                                 RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
@@ -1119,10 +1141,13 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Surface(Modifier.size(38.dp).clickable { tilt3D = !tilt3D }, shape = RoundedCornerShape(8.dp), color = if (tilt3D) Color(0xFF087CCB) else panel) {
                         Box(contentAlignment = Alignment.Center) { Text(if (tilt3D) "3D" else "2D", color = White, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold) }
                     }
+                    Surface(Modifier.size(38.dp).clickable { showRouteAvoidDialog = true }, shape = RoundedCornerShape(8.dp), color = panel) {
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.EditRoad, "Route restrictions and road avoidance", tint = Color(0xFFFFB15C)) }
+                    }
                     Surface(Modifier.size(38.dp).clickable { zoom = (zoom + 1).coerceAtMost(6) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, "Zoom in", tint = White) }
                     }
-                    Surface(Modifier.size(38.dp).clickable { zoom = (zoom - 2).coerceAtLeast(-5) }, shape = RoundedCornerShape(8.dp), color = panel) {
+                    Surface(Modifier.size(38.dp).clickable { zoom = (zoom - 1).coerceAtLeast(-5) }, shape = RoundedCornerShape(8.dp), color = panel) {
                         Box(contentAlignment = Alignment.Center) { Text("−", color = White, fontSize = 27.sp, fontWeight = FontWeight.Medium) }
                     }
                 }
@@ -1192,6 +1217,13 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     .background(Color(0xFF0B1117)).padding(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
+                RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.let { current ->
+                    LaneGuidanceCard(
+                        instruction = current.label,
+                        roadName = current.roadName,
+                        distance = distanceToManeuver?.let(::formatNavigationDistance) ?: "—"
+                    )
+                }
                 if (RoutePlanStore.maneuvers.isNotEmpty()) {
                     RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(4).forEachIndexed { index, maneuver ->
                         val distanceLabel = if (index == 0) distanceToManeuver?.let(::formatNavigationDistance) ?: "—" else "UP NEXT"
@@ -1213,12 +1245,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Text("DESTINATION", color = Color(0xFF91A2AE), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
-                Text(
-                    if (RoutePlanStore.coordinatesJson != null) RoutePlanStore.destination else "No destination set",
-                    color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(4.dp), maxLines = 2
-                )
                 RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let {
                     val distanceLabel = remainingDistanceMetres?.let(::formatNavigationDistance)
                         ?: RoutePlanStore.summary?.substringBefore(" · ") ?: "—"
@@ -1284,6 +1310,195 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     ) {
                         Icon(tab.second, contentDescription = tab.first, tint = White, modifier = Modifier.size(20.dp))
                         Text(tab.first, color = White, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showRouteAvoidDialog) {
+        Dialog(onDismissRequest = { if (!avoidActionBusy) showRouteAvoidDialog = false }) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.94f),
+                color = Color(0xFF111B23),
+                shape = RoundedCornerShape(16.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF40586A))
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.EditRoad, null, tint = Color(0xFFFFB15C))
+                        Spacer(Modifier.width(9.dp))
+                        Text("ROUTE & ROAD CONTROLS", color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        Icon(Icons.Default.Close, "Close", tint = Color(0xFFB8C7D1),
+                            modifier = Modifier.clickable { if (!avoidActionBusy) showRouteAvoidDialog = false })
+                    }
+                    Text("HAULWAY will calculate a new HGV route around the selected road or area. Avoidance zones are temporary and remain active for this route.",
+                        color = Color(0xFFB8C7D1), fontSize = 11.sp)
+                    Surface(
+                        Modifier.fillMaxWidth().clickable {
+                            val lat = liveLatitude; val lon = liveLongitude
+                            val route = RoutePlanStore.coordinatesJson
+                            if (lat == null || lon == null || route.isNullOrBlank()) {
+                                Toast.makeText(appContext, "Start a route and wait for a GPS fix first.", Toast.LENGTH_LONG).show()
+                            } else {
+                                val point = pointAheadOnRoute(lat, lon, route, 500.0)
+                                if (point == null) Toast.makeText(appContext, "Could not identify the road ahead on this route.", Toast.LENGTH_LONG).show()
+                                else {
+                                    avoidActionBusy = true
+                                    mapSearchScope.launch {
+                                        try {
+                                            val newAvoid = (RoutePlanStore.avoidPoints + point).distinct()
+                                            val updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, lon to lat, newAvoid)
+                                            RoutePlanStore.avoidPoints = newAvoid
+                                            RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                            RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            RoutePlanStore.maneuvers = updated.maneuvers
+                                            RoutePlanStore.steps = updated.steps
+                                            activeManeuverIndex = 0
+                                            lastSpokenStage = ""
+                                            Toast.makeText(appContext, "Road ahead avoided. New HGV route ready.", Toast.LENGTH_LONG).show()
+                                            showRouteAvoidDialog = false
+                                        } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not avoid road ahead.", Toast.LENGTH_LONG).show() }
+                                        finally { avoidActionBusy = false }
+                                    }
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(9.dp), color = Color(0xFF19384B),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.TurnRight, null, tint = Color(0xFF8BD5FF))
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("AVOID ROAD AHEAD", color = White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Block a short section about 500 m ahead and reroute", color = Color(0xFFB8C7D1), fontSize = 10.sp)
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = White)
+                        }
+                    }
+                    Text("AVOID A SPECIFIC ROAD / BLOCK ROAD", color = Color(0xFF8BD5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = avoidRoadText,
+                        onValueChange = { avoidRoadText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("Road name, junction or postcode") },
+                        label = { Text("Road to avoid") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = White, unfocusedTextColor = White,
+                            focusedBorderColor = Color(0xFF48B9E8), unfocusedBorderColor = Color(0xFF53616D),
+                            focusedLabelColor = Color(0xFF70C9FF), unfocusedLabelColor = Color(0xFFB7C4CD),
+                            cursorColor = White
+                        )
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                if (avoidRoadText.isBlank()) {
+                                    Toast.makeText(appContext, "Enter the road or junction to avoid.", Toast.LENGTH_SHORT).show()
+                                } else if (RoutePlanStore.coordinatesJson == null || RoutePlanStore.destination.isBlank()) {
+                                    Toast.makeText(appContext, "Start a route before adding road restrictions.", Toast.LENGTH_LONG).show()
+                                } else {
+                                    avoidActionBusy = true
+                                    mapSearchScope.launch {
+                                        try {
+                                            val match = searchMapPlaces(avoidRoadText, liveLatitude, liveLongitude).firstOrNull()
+                                                ?: throw IllegalStateException("Road or location not found. Try a road name with town or postcode.")
+                                            val newAvoid = (RoutePlanStore.avoidPoints + (match.latitude to match.longitude)).distinct()
+                                            val originLon = liveLongitude ?: throw IllegalStateException("GPS position is not ready.")
+                                            val originLat = liveLatitude ?: throw IllegalStateException("GPS position is not ready.")
+                                            val updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, originLon to originLat, newAvoid)
+                                            RoutePlanStore.avoidPoints = newAvoid
+                                            RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                            RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            RoutePlanStore.maneuvers = updated.maneuvers
+                                            RoutePlanStore.steps = updated.steps
+                                            activeManeuverIndex = 0
+                                            lastSpokenStage = ""
+                                            Toast.makeText(appContext, "Road restriction applied. New HGV route ready.", Toast.LENGTH_LONG).show()
+                                            showRouteAvoidDialog = false
+                                        } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not apply road restriction.", Toast.LENGTH_LONG).show() }
+                                        finally { avoidActionBusy = false }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !avoidActionBusy && avoidRoadText.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF087CCB))
+                        ) { Text("AVOID ROAD", fontSize = 10.sp) }
+                        Button(
+                            onClick = {
+                                if (avoidRoadText.isBlank()) {
+                                    Toast.makeText(appContext, "Enter the road or junction to block.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    avoidActionBusy = true
+                                    mapSearchScope.launch {
+                                        try {
+                                            val match = searchMapPlaces(avoidRoadText, liveLatitude, liveLongitude).firstOrNull()
+                                                ?: throw IllegalStateException("Road or location not found.")
+                                            val blockOffset = 0.0035 / kotlin.math.cos(Math.toRadians(match.latitude)).coerceAtLeast(0.2)
+                                            val blocked = match.latitude to match.longitude
+                                            val expanded = (RoutePlanStore.avoidPoints + blocked + (match.latitude + 0.0018 to match.longitude + blockOffset)).distinct()
+                                            val originLon = liveLongitude ?: throw IllegalStateException("GPS position is not ready.")
+                                            val originLat = liveLatitude ?: throw IllegalStateException("GPS position is not ready.")
+                                            val updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, originLon to originLat, expanded)
+                                            RoutePlanStore.avoidPoints = expanded
+                                            RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                            RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            RoutePlanStore.maneuvers = updated.maneuvers
+                                            RoutePlanStore.steps = updated.steps
+                                            activeManeuverIndex = 0
+                                            lastSpokenStage = ""
+                                            Toast.makeText(appContext, "Road blocked for this route. Alternative HGV route ready.", Toast.LENGTH_LONG).show()
+                                            showRouteAvoidDialog = false
+                                        } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not block road.", Toast.LENGTH_LONG).show() }
+                                        finally { avoidActionBusy = false }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !avoidActionBusy && avoidRoadText.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB64A36))
+                        ) { Text("BLOCK ROAD", fontSize = 10.sp) }
+                    }
+                    if (RoutePlanStore.avoidPoints.isNotEmpty()) {
+                        Text("ACTIVE AVOIDANCE ZONES: ${RoutePlanStore.avoidPoints.size}", color = Color(0xFFFFC27A), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("These zones are sent to the HGV routing engine and are reapplied if the route recalculates.", color = Color(0xFFB8C7D1), fontSize = 10.sp)
+                        Text("CLEAR RESTRICTIONS", color = Color(0xFFFF8C78), fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable {
+                                avoidActionBusy = true
+                                mapSearchScope.launch {
+                                    try {
+                                        val lat = liveLatitude ?: throw IllegalStateException("GPS position is not ready.")
+                                        val lon = liveLongitude ?: throw IllegalStateException("GPS position is not ready.")
+                                        val updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, lon to lat, emptyList())
+                                        RoutePlanStore.avoidPoints = emptyList()
+                                        RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                        RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                        RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                        RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                        RoutePlanStore.maneuvers = updated.maneuvers
+                                        RoutePlanStore.steps = updated.steps
+                                        activeManeuverIndex = 0
+                                        showRouteAvoidDialog = false
+                                    } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not clear restrictions.", Toast.LENGTH_LONG).show() }
+                                    finally { avoidActionBusy = false }
+                                }
+                            })
+                    }
+                    if (avoidActionBusy) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color(0xFF48B9E8), strokeWidth = 2.dp)
+                            Text("RECALCULATING HGV ROUTE…", color = Color(0xFF8BD5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -1564,6 +1779,98 @@ private fun MapQuickActionCard(icon: ImageVector, title: String, subtitle: Strin
                 Text(title, color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(subtitle, color = Color(0xFFD0D7DD), fontSize = 9.sp, maxLines = 2)
             }
+        }
+    }
+}
+
+@Composable
+private fun pointAheadOnRoute(latitude: Double, longitude: Double, routeJson: String, distanceAheadMetres: Double): Pair<Double, Double>? {
+    return try {
+        val points = org.json.JSONArray(routeJson)
+        if (points.length() < 2) return null
+        var nearestIndex = 0
+        var nearestDistance = Double.MAX_VALUE
+        for (i in 0 until points.length()) {
+            val p = points.getJSONArray(i)
+            val d = distanceMetres(latitude, longitude, p.getDouble(1), p.getDouble(0))
+            if (d < nearestDistance) { nearestDistance = d; nearestIndex = i }
+        }
+        var remaining = distanceAheadMetres
+        var previous = points.getJSONArray(nearestIndex)
+        for (i in nearestIndex + 1 until points.length()) {
+            val next = points.getJSONArray(i)
+            val lon1 = previous.getDouble(0); val lat1 = previous.getDouble(1)
+            val lon2 = next.getDouble(0); val lat2 = next.getDouble(1)
+            val segment = distanceMetres(lat1, lon1, lat2, lon2)
+            if (segment >= remaining && segment > 0.0) {
+                val fraction = (remaining / segment).coerceIn(0.0, 1.0)
+                return (lat1 + (lat2 - lat1) * fraction) to (lon1 + (lon2 - lon1) * fraction)
+            }
+            remaining -= segment
+            previous = next
+        }
+        val last = points.getJSONArray(points.length() - 1)
+        last.getDouble(1) to last.getDouble(0)
+    } catch (_: Exception) { null }
+}
+
+@Composable
+private fun LaneGuidanceCard(instruction: String, roadName: String, distance: String) {
+    val text = instruction.lowercase(Locale.UK)
+    val exit = Regex("(?:exit|take)\\s+(?:the\\s+)?(\\d+)(?:st|nd|rd|th)?\\s+exit").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    val isRoundabout = "roundabout" in text
+    val isLeft = "left" in text || (isRoundabout && exit == 1)
+    val isRight = "right" in text || (isRoundabout && exit != null && exit >= 3)
+    val selectedLane = when { isLeft -> 0; isRight -> 2; else -> 1 }
+    val title = when {
+        isRoundabout && exit != null -> "ROUNDABOUT · EXIT $exit"
+        isRoundabout -> "ROUNDABOUT · FOLLOW SIGNS"
+        isLeft -> "KEEP LEFT"
+        isRight -> "KEEP RIGHT"
+        else -> "FOLLOW ROUTE AHEAD"
+    }
+    Surface(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xE91B2A35),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+    ) {
+        Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Signpost, null, tint = Color(0xFF8BD5FF), modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("LANE & EXIT GUIDANCE", color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                Text(distance, color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+            Text(title, color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("LEFT", "AHEAD", "RIGHT").forEachIndexed { index, label ->
+                    val active = index == selectedLane
+                    Surface(
+                        Modifier.weight(1f).height(54.dp),
+                        shape = RoundedCornerShape(5.dp),
+                        color = if (active) Color(0xFF075C91) else Color(0xFF202C35),
+                        border = androidx.compose.foundation.BorderStroke(if (active) 2.dp else 1.dp, if (active) Color(0xFF55C5FF) else Color(0xFF465967))
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(when (index) {
+                                0 -> Icons.Default.TurnLeft
+                                2 -> Icons.Default.TurnRight
+                                else -> Icons.Default.ArrowUpward
+                            }, null, tint = if (active) Color.White else Color(0xFF8195A3), modifier = Modifier.size(23.dp))
+                            Text(label, color = if (active) White else Color(0xFF9EADB7), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Text(
+                if (isRoundabout && exit != null) "Take exit $exit · confirm with roadside lane arrows"
+                else if (isLeft) "Position for the left turn"
+                else if (isRight) "Position for the right turn"
+                else "Lane-level data not supplied for this junction",
+                color = Color(0xFFB8C7D1), fontSize = 8.sp, maxLines = 2
+            )
+            if (roadName.isNotBlank()) Text(roadName, color = Color(0xFF8BD5FF), fontSize = 8.sp, maxLines = 1)
         }
     }
 }
