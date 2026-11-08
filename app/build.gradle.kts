@@ -44,8 +44,8 @@ android {
         applicationId = "com.czerman.haulway_navigation"
         minSdk = 26
         targetSdk = 37
-        versionCode = 29
-        versionName = "2.2.5-vision22-lower-vehicle-position"
+        versionCode = 30
+        versionName = "2.2.6-vision22-lower-vehicle-position-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ORS_API_KEY", "\"${orsApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
