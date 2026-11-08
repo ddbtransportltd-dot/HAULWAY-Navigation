@@ -633,6 +633,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var mapSearchLoading by remember { mutableStateOf(false) }
     var mapSearchError by remember { mutableStateOf<String?>(null) }
     var selectedMapSearchLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var selectedMapSearchPlace by remember { mutableStateOf<MapSearchResult?>(null) }
     var mapFollowRequest by remember { mutableIntStateOf(0) }
     var mapStyleRequest by remember { mutableIntStateOf(0) }
     var headingUp by remember { mutableStateOf(true) }
@@ -712,7 +713,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
         lastSpeedLimitFetchLon = lon
         liveSpeedLimitMph = withContext(Dispatchers.IO) {
             runCatching {
-                val query = "[out:json][timeout:8];way(around:45,$lat,$lon)[highway][maxspeed];out geom tags;"
+                val query = "[out:json][timeout:10];(way(around:80,$lat,$lon)[highway][maxspeed:hgv];way(around:80,$lat,$lon)[highway][maxspeed];);out geom tags;
                 val url = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 5000
@@ -727,7 +728,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     for (index in 0 until elements.length()) {
                         val item = elements.optJSONObject(index) ?: continue
                         val tags = item.optJSONObject("tags") ?: continue
-                        val raw = tags.optString("maxspeed", "").lowercase(Locale.UK)
+                        val raw = tags.optString("maxspeed:hgv", "").ifBlank { tags.optString("maxspeed", "") }.lowercase(Locale.UK)
                         val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value?.toDoubleOrNull() ?: continue
                         val mph = if (raw.contains("km/h") || raw.contains("kph")) number * 0.621371 else number
                         val geometry = item.optJSONArray("geometry") ?: continue
@@ -761,7 +762,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             nearestValue = mph.toInt()
                         }
                     }
-                    if (nearestDistance <= 45.0) nearestValue else null
+                    if (nearestDistance <= 80.0) nearestValue else null
                 } finally { connection.disconnect() }
             }.getOrNull()
         }
@@ -981,17 +982,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     val blue = Color(0xFF078FE0)
 
     Column(Modifier.fillMaxSize().background(Color(0xFF080E13)).padding(5.dp)) {
-        Row(
-            Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("HAUL", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-            Text("WAY", color = Color(0xFF168FE8), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.weight(1f))
-            Text(clockText, color = White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-
-        }
+        DeviceStatusHeader(modifier = Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 6.dp))
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
@@ -1011,6 +1002,31 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Search, contentDescription = "Search address or postcode", tint = White, modifier = Modifier.size(25.dp))
+                    }
+                }
+
+                RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.let { maneuver ->
+                    val instruction = maneuver.label.lowercase(Locale.UK)
+                    val exitNumber = Regex("(?:exit|take)\\s+(?:the\\s+)?(\\d+)(?:st|nd|rd|th)?\\s+exit")
+                        .find(instruction)?.groupValues?.getOrNull(1)
+                    val laneHint = when {
+                        "roundabout" in instruction && exitNumber != null -> "FOLLOW SIGNS FOR EXIT $exitNumber"
+                        "roundabout" in instruction -> "FOLLOW ROUNDABOUT SIGNS"
+                        "left" in instruction -> "POSITION LEFT"
+                        "right" in instruction -> "POSITION RIGHT"
+                        else -> "FOLLOW ROUTE MARKINGS"
+                    }
+                    Surface(
+                        Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 58.dp, end = 58.dp),
+                        shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+                    ) {
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(if (exitNumber != null && "roundabout" in instruction) "ROUNDABOUT · EXIT $exitNumber" else maneuver.label.uppercase(Locale.UK),
+                                color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                            Text(laneHint + "  ·  " + (distanceToManeuver?.let(::formatNavigationDistance) ?: "—"),
+                                color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
                     }
                 }
 
@@ -1204,7 +1220,6 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     }
 
     if (showMapSearch) {
-        // Global search-as-you-type: debounce input and refresh address / place suggestions automatically.
         LaunchedEffect(mapSearchText, showMapSearch) {
             val query = mapSearchText.trim()
             if (query.length < 3) {
@@ -1219,7 +1234,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     val results = searchMapPlaces(query, liveLatitude, liveLongitude)
                     if (mapSearchText.trim() == query) {
                         mapSearchResults = results
-                        mapSearchError = if (results.isEmpty()) "No matching addresses found" else null
+                        mapSearchError = if (results.isEmpty()) "No matching streets or places found" else null
                     }
                 } catch (e: Exception) {
                     if (mapSearchText.trim() == query) mapSearchError = e.localizedMessage ?: "Address search failed"
@@ -1228,102 +1243,192 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 }
             }
         }
-        Dialog(onDismissRequest = { showMapSearch = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Dialog(
+            onDismissRequest = { showMapSearch = false; selectedMapSearchPlace = null; selectedMapSearchLocation = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
             Surface(
-                modifier = Modifier.fillMaxWidth(0.78f),
-                color = Color(0xFF18232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp
+                modifier = Modifier.fillMaxWidth(0.98f).fillMaxHeight(0.94f),
+                color = Color(0xB818232C), shape = RoundedCornerShape(14.dp), tonalElevation = 12.dp
             ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Search, null, tint = Color(0xFF48B9E8))
                         Spacer(Modifier.width(8.dp))
                         Text("SEARCH MAP", color = White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        Text("CLOSE", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clickable { showMapSearch = false; selectedMapSearchPlace = null; selectedMapSearchLocation = null }.padding(6.dp))
                     }
-                    Text("Find an address, town or postcode", color = Color(0xFFB7C4CD), fontSize = 12.sp)
+                    Text("Street, house number, postcode, business or nearby place", color = Color(0xFFB7C4CD), fontSize = 12.sp)
                     OutlinedTextField(
-                        value = mapSearchText, onValueChange = { mapSearchText = it; mapSearchError = null },
+                        value = mapSearchText,
+                        onValueChange = {
+                            mapSearchText = it
+                            mapSearchError = null
+                            selectedMapSearchPlace = null
+                            selectedMapSearchLocation = null
+                        },
                         modifier = Modifier.fillMaxWidth(), singleLine = true,
-                        placeholder = { Text("Start typing a postcode, street or address", color = Color(0xFF82919B)) },
-                        label = { Text("Address or postcode") },
+                        placeholder = { Text("Start typing a street, address or place…", color = Color(0xFF82919B)) },
+                        label = { Text("Search address or place") },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = White, unfocusedTextColor = White,
                             focusedBorderColor = Color(0xFF48B9E8), unfocusedBorderColor = Color(0xFF53616D),
                             focusedLabelColor = Color(0xFF70C9FF), unfocusedLabelColor = Color(0xFFB7C4CD), cursorColor = White
                         )
                     )
-                    Button(
-                        onClick = {
-                            if (mapSearchText.isNotBlank()) {
-                                mapSearchLoading = true; mapSearchError = null
-                                mapSearchScope.launch {
-                                    try {
-                                        mapSearchResults = searchMapPlaces(mapSearchText.trim(), liveLatitude, liveLongitude)
-                                        if (mapSearchResults.isEmpty()) mapSearchError = "No matching addresses found"
-                                    } catch (e: Exception) { mapSearchError = e.localizedMessage ?: "Address search failed" }
-                                    finally { mapSearchLoading = false }
-                                }
-                            }
-                        }, enabled = mapSearchText.trim().length >= 3 && !mapSearchLoading,
-                        modifier = Modifier.fillMaxWidth().height(42.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF087CCB))
-                    ) {
-                        if (mapSearchLoading) CircularProgressIndicator(Modifier.size(16.dp), color = White, strokeWidth = 2.dp)
-                        else Icon(Icons.Default.Search, null, tint = White)
-                        Spacer(Modifier.width(7.dp)); Text("SEARCH", color = White, fontWeight = FontWeight.Bold)
+                    if (mapSearchLoading) Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(15.dp), color = Color(0xFF70C9FF), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(7.dp))
+                        Text("SEARCHING STREETS AND PLACES…", color = Color(0xFFB7C4CD), fontSize = 10.sp)
                     }
                     mapSearchError?.let { Text(it, color = Color(0xFFFF9B8F), fontSize = 12.sp) }
-                    if (mapSearchResults.isNotEmpty()) {
-                        Text("SELECT A DESTINATION — HAULWAY WILL CALCULATE THE HGV ROUTE", color = Color(0xFF70C9FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Column(Modifier.fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            mapSearchResults.forEach { place ->
-                                Surface(Modifier.fillMaxWidth().clickable {
-                                    // Selecting a map-search suggestion must calculate a real HGV route,
-                                    // not merely move the map camera to the searched coordinate.
-                                    mapSearchLoading = true
-                                    mapSearchError = null
-                                    mapSearchScope.launch {
-                                        try {
-                                            check(liveLatitude != null && liveLongitude != null) {
-                                                "GPS position is not ready. Wait for the blue vehicle marker, then select the address again."
-                                            }
-                                            val calculated = calculateRoadRoute(
-                                                listOf("CURRENT LOCATION", place.name),
-                                                "FASTEST",
-                                                appContext
-                                            )
-                                            RoutePlanStore.coordinatesJson = calculated.coordinatesJson
-                                            RoutePlanStore.summary = "${calculated.distanceText} · ${calculated.durationText}"
-                                            RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
-                                            RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
-                remainingDistanceMetres = calculated.totalDistanceMetres
-                                            remainingDurationSeconds = calculated.totalDurationSeconds
-                                            RoutePlanStore.steps = calculated.steps
-                                            RoutePlanStore.maneuvers = calculated.maneuvers
-                                            RoutePlanStore.origin = "CURRENT LOCATION"
-                                            RoutePlanStore.destination = place.name
-                                            // The route renderer frames the complete route itself.
-                                            selectedMapSearchLocation = null
-                                            mapSearchResults = emptyList()
-                                            showMapSearch = false
-                                        } catch (e: Exception) {
-                                            mapSearchError = e.localizedMessage ?: "Could not calculate HGV route"
-                                        } finally {
-                                            mapSearchLoading = false
+                    val previewPlace = selectedMapSearchPlace
+                    if (previewPlace == null) {
+                        if (mapSearchResults.isNotEmpty()) {
+                            Text("SUGGESTED STREETS & PLACES", color = Color(0xFF70C9FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                mapSearchResults.forEach { place ->
+                                    Surface(
+                                        Modifier.fillMaxWidth().clickable {
+                                            selectedMapSearchPlace = place
+                                            selectedMapSearchLocation = place.latitude to place.longitude
+                                        },
+                                        color = Color(0xB826333D), shape = RoundedCornerShape(7.dp)
+                                    ) {
+                                        Row(Modifier.padding(11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Place, null, tint = Color(0xFF70C9FF), modifier = Modifier.size(20.dp))
+                                            Spacer(Modifier.width(9.dp))
+                                            Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                            Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF70C9FF))
                                         }
                                     }
-                                }, color = Color(0xFF26333D), shape = RoundedCornerShape(7.dp)) {
-                                    Text(place.name, color = White, fontSize = 12.sp, modifier = Modifier.padding(10.dp))
                                 }
                             }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                            Text("Type at least 3 characters to see live street and place suggestions.", color = Color(0xFF9EADB8), fontSize = 12.sp)
+                            Spacer(Modifier.weight(1f))
                         }
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Text("CLOSE", color = Color(0xFF70C9FF), fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { showMapSearch = false }.padding(8.dp))
+                    } else {
+                        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                            GoogleStreetViewPreview(previewPlace.latitude, previewPlace.longitude,
+                                Modifier.fillMaxWidth().height(190.dp))
+                            Text(previewPlace.name, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text("Selected destination · map preview", color = Color(0xFF8BD5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        val prefs = appContext.getSharedPreferences("haulway_saved_places", Context.MODE_PRIVATE)
+                                        val raw = prefs.getString("items", null)
+                                        val existing = try {
+                                            val array = org.json.JSONArray(raw ?: "[]")
+                                            (0 until array.length()).map { index ->
+                                                val item = array.getJSONObject(index)
+                                                item.optString("name") to item.optString("address")
+                                            }
+                                        } catch (_: Exception) { emptyList() }
+                                        val updated = (existing + (previewPlace.name to previewPlace.name))
+                                            .distinctBy { it.second.lowercase(Locale.UK) }
+                                        savePlaces(prefs, updated)
+                                        mapSearchError = "Saved to MY PLACES"
+                                    },
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF344654))
+                                ) {
+                                    Icon(Icons.Default.BookmarkAdd, null, modifier = Modifier.size(17.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("SAVE LOCATION", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Button(
+                                    onClick = {
+                                        mapSearchLoading = true
+                                        mapSearchError = null
+                                        mapSearchScope.launch {
+                                            try {
+                                                check(liveLatitude != null && liveLongitude != null) {
+                                                    "GPS position is not ready. Wait for the blue vehicle marker, then try GO again."
+                                                }
+                                                val calculated = calculateRoadRoute(
+                                                    listOf("CURRENT LOCATION", previewPlace.name),
+                                                    "FASTEST",
+                                                    appContext
+                                                )
+                                                RoutePlanStore.coordinatesJson = calculated.coordinatesJson
+                                                RoutePlanStore.summary = calculated.distanceText + " · " + calculated.durationText
+                                                RoutePlanStore.totalDistanceMetres = calculated.totalDistanceMetres
+                                                RoutePlanStore.totalDurationSeconds = calculated.totalDurationSeconds
+                                                remainingDistanceMetres = calculated.totalDistanceMetres
+                                                remainingDurationSeconds = calculated.totalDurationSeconds
+                                                RoutePlanStore.steps = calculated.steps
+                                                RoutePlanStore.maneuvers = calculated.maneuvers
+                                                RoutePlanStore.origin = "CURRENT LOCATION"
+                                                RoutePlanStore.destination = previewPlace.name
+                                                showMapSearch = false
+                                                selectedMapSearchPlace = null
+                                                selectedMapSearchLocation = null
+                                                followEnabled = true
+                                            } catch (e: Exception) {
+                                                mapSearchError = e.localizedMessage ?: "Could not calculate HGV route"
+                                            } finally {
+                                                mapSearchLoading = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !mapSearchLoading && liveLatitude != null && liveLongitude != null,
+                                    modifier = Modifier.weight(1f).height(44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF087CCB))
+                                ) {
+                                    Icon(Icons.Default.Navigation, null, modifier = Modifier.size(17.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("GO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Text("BACK TO RESULTS", color = Color(0xFF70C9FF), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { selectedMapSearchPlace = null; selectedMapSearchLocation = null }.padding(6.dp))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+
+@Composable
+private fun GoogleStreetViewPreview(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
+    val imageState = produceState<Pair<androidx.compose.ui.graphics.ImageBitmap?, String>>(initialValue = null to "LOADING STREET VIEW…", latitude, longitude) {
+        value = null to "LOADING STREET VIEW…"
+        val key = BuildConfig.GOOGLE_MAPS_API_KEY
+        if (key.isBlank()) {
+            value = null to "GOOGLE STREET VIEW KEY REQUIRED"
+            return@produceState
+        }
+        value = withContext(Dispatchers.IO) {
+            try {
+                val url = URL("https://maps.googleapis.com/maps/api/streetview?size=640x320&location=" + latitude + "," + longitude + "&fov=90&pitch=0&key=" + URLEncoder.encode(key, "UTF-8"))
+                val connection = (url.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 7000
+                    readTimeout = 9000
+                }
+                try {
+                    val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
+                    if (bitmap != null) bitmap.asImageBitmap() to "GOOGLE STREET VIEW"
+                    else null to "NO STREET VIEW IMAGE"
+                } finally { connection.disconnect() }
+            } catch (_: Exception) {
+                null to "STREET VIEW UNAVAILABLE HERE"
+            }
+        }
+    }
+    Box(modifier.clip(RoundedCornerShape(9.dp)).background(Color(0xFF172630)), contentAlignment = Alignment.Center) {
+        val bitmap = imageState.value.first
+        if (bitmap != null) {
+            Image(bitmap = bitmap, contentDescription = "Street View preview", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Text(imageState.value.second, color = Color.White, fontSize = 8.sp,
+                modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xAA000000)).padding(horizontal = 5.dp, vertical = 3.dp))
+        } else Text(imageState.value.second, color = Color(0xFFB7C4CD), fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -1598,10 +1703,11 @@ private fun HaulwayNativeMapCanvas(
             runCatching {
                 // Search near the truck and at sampled points along the route to show signs ahead.
                 val centers = mutableListOf<Pair<Double, Double>>()
-                centers.add(lat to lon)
+                if (routeJson.isNullOrBlank()) return@withContext JSONObject().put("type", "FeatureCollection").put("features", org.json.JSONArray()).toString()
+                val routePointsForFilter = org.json.JSONArray(routeJson)
                 if (!routeJson.isNullOrBlank()) {
                     val routePoints = org.json.JSONArray(routeJson)
-                    val sampleCount = minOf(12, routePoints.length())
+                    val sampleCount = minOf(50, routePoints.length())
                     for (sample in 0 until sampleCount) {
                         val index = if (sampleCount <= 1) 0 else (sample.toDouble() * (routePoints.length() - 1) / (sampleCount - 1)).toInt()
                         val coordinate = routePoints.optJSONArray(index) ?: continue
@@ -1614,7 +1720,7 @@ private fun HaulwayNativeMapCanvas(
                 }
                 val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(13)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "node(around:250,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed];"
+                    "node(around:250,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];node(around:250,$centerLat,$centerLon)[maxspeed:hgv];way(around:250,$centerLat,$centerLon)[highway][maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed:hgv];"
                 }
                 val query = "[out:json][timeout:18];($clauses);out center tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
@@ -1636,6 +1742,26 @@ private fun HaulwayNativeMapCanvas(
                 val elements = response.optJSONArray("elements") ?: org.json.JSONArray()
                 val features = org.json.JSONArray()
                 val seen = HashSet<String>()
+                fun routeDistanceMetres(latitude: Double, longitude: Double): Double {
+                    val mx = 111320.0 * kotlin.math.cos(Math.toRadians(latitude))
+                    val my = 111320.0
+                    var best = Double.MAX_VALUE
+                    for (pointIndex in 1 until routePointsForFilter.length()) {
+                        val a = routePointsForFilter.optJSONArray(pointIndex - 1) ?: continue
+                        val b = routePointsForFilter.optJSONArray(pointIndex) ?: continue
+                        if (a.length() < 2 || b.length() < 2) continue
+                        val ax = (a.optDouble(0) - longitude) * mx
+                        val ay = (a.optDouble(1) - latitude) * my
+                        val bx = (b.optDouble(0) - longitude) * mx
+                        val by = (b.optDouble(1) - latitude) * my
+                        val dx = bx - ax
+                        val dy = by - ay
+                        val lengthSquared = dx * dx + dy * dy
+                        val t = if (lengthSquared > 0.0) ((-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)) else 0.0
+                        best = minOf(best, kotlin.math.hypot(ax + t * dx, ay + t * dy))
+                    }
+                    return best
+                }
                 for (index in 0 until elements.length()) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
@@ -1644,8 +1770,8 @@ private fun HaulwayNativeMapCanvas(
                         tags.optString("highway") == "give_way" -> "GIVE WAY"
                         tags.optString("highway") == "traffic_signals" -> "●"
                         tags.optString("highway") == "speed_camera" -> "CAM"
-                        tags.has("maxspeed") -> {
-                            val raw = tags.optString("maxspeed")
+                        tags.has("maxspeed:hgv") || tags.has("maxspeed") -> {
+                            val raw = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed") }
                             val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value ?: continue
                             val numeric = number.toDoubleOrNull() ?: continue
                             val mph = if (raw.contains("km/h", true) || raw.contains("kph", true)) (numeric * 0.621371).toInt() else numeric.toInt()
@@ -1656,6 +1782,7 @@ private fun HaulwayNativeMapCanvas(
                     val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
                     val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
                     if (!latValue.isFinite() || !lonValue.isFinite()) continue
+                    if (routeDistanceMetres(latValue, lonValue) > 35.0) continue
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
                     val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
@@ -1786,9 +1913,9 @@ private fun HaulwayNativeMapCanvas(
         } else {
             val hasGps = latitude != null && longitude != null
             val currentCamera = map.cameraPosition
-            val shouldFollowGps = hasGps && (followEnabled || forceGpsRecenter)
-            val target = if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
-            val baseZoom = if (shouldFollowGps) (15.0 + zoom.toDouble()) else currentCamera.zoom
+            val shouldFollowGps = searchLocation == null && hasGps && (followEnabled || forceGpsRecenter)
+            val target = searchLocation?.let { LatLng(it.first, it.second) } ?: if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
+            val baseZoom = if (searchLocation != null) 16.5 else if (shouldFollowGps) (15.0 + zoom.toDouble()) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
@@ -1799,10 +1926,10 @@ private fun HaulwayNativeMapCanvas(
             // Increase zoom progressively as the next manoeuvre gets closer.
             val approachZoom = when {
                 distanceToManeuver == null -> 0.0
-                distanceToManeuver < 250.0 -> 2.8
-                distanceToManeuver < 600.0 -> 2.0
-                distanceToManeuver < 1100.0 -> 1.2
-                distanceToManeuver < 1600.0 -> 0.5
+                distanceToManeuver < 250.0 -> 3.2
+                distanceToManeuver < 600.0 -> 2.4
+                distanceToManeuver < 1100.0 -> 1.5
+                distanceToManeuver < 1600.0 -> 0.7
                 else -> 0.0
             }
             val targetZoom = (baseZoom + maxOf(maneuverZoom, approachZoom)).coerceAtMost(17.0)
@@ -3189,7 +3316,35 @@ private suspend fun fetchHaulwayTrafficIncidents(context: Context, scope: String
                     geometrySegments = geometrySegments
                 )
             }
-            HaulwayTrafficSnapshot(incidents, System.currentTimeMillis(), connection.getHeaderField("TrafficModelID"))
+            val routeOnlyIncidents = if (scope == "ROUTE" && !routeJson.isNullOrBlank()) {
+                val routePoints = org.json.JSONArray(routeJson)
+                fun distanceToRouteMetres(longitude: Double, latitude: Double): Double {
+                    val mx = 111320.0 * kotlin.math.cos(Math.toRadians(latitude))
+                    val my = 111320.0
+                    var best = Double.MAX_VALUE
+                    for (pointIndex in 1 until routePoints.length()) {
+                        val a = routePoints.optJSONArray(pointIndex - 1) ?: continue
+                        val b = routePoints.optJSONArray(pointIndex) ?: continue
+                        if (a.length() < 2 || b.length() < 2) continue
+                        val ax = (a.optDouble(0) - longitude) * mx
+                        val ay = (a.optDouble(1) - latitude) * my
+                        val bx = (b.optDouble(0) - longitude) * mx
+                        val by = (b.optDouble(1) - latitude) * my
+                        val dx = bx - ax
+                        val dy = by - ay
+                        val lengthSquared = dx * dx + dy * dy
+                        val t = if (lengthSquared > 0.0) ((-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)) else 0.0
+                        best = minOf(best, kotlin.math.hypot(ax + t * dx, ay + t * dy))
+                    }
+                    return best
+                }
+                incidents.filter { incident ->
+                    incident.geometrySegments.flatten().any { point ->
+                        distanceToRouteMetres(point.first, point.second) <= 180.0
+                    }
+                }
+            } else incidents
+            HaulwayTrafficSnapshot(routeOnlyIncidents, System.currentTimeMillis(), connection.getHeaderField("TrafficModelID"))
         } finally {
             connection.disconnect()
         }
@@ -3241,7 +3396,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
     }
     var searchText by remember { mutableStateOf("") }
     var selectedGroup by remember { mutableStateOf("ALL") }
-    var selectedScope by remember { mutableStateOf("NEAR ME") }
+    var selectedScope by remember { mutableStateOf("ROUTE") }
     var trafficSnapshot by remember { mutableStateOf<HaulwayTrafficSnapshot?>(null) }
     var trafficLoading by remember { mutableStateOf(false) }
     var trafficError by remember { mutableStateOf<String?>(null) }
@@ -3306,7 +3461,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("MAP", "ROUTE", "NEAR ME").forEach { scope ->
+                listOf("ROUTE").forEach { scope ->
                     Surface(
                         modifier = Modifier.weight(1f).clickable { selectedScope = scope },
                         shape = RoundedCornerShape(5.dp),
@@ -3454,7 +3609,7 @@ private fun TrafficVisionPanel(modifier: Modifier = Modifier) {
             Text("FILTERS ARE SAVED ON THIS DEVICE", color = muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
         }
         Box(Modifier.weight(0.66f).fillMaxHeight().padding(start = 3.dp)) {
-            RoutePlannerMapView(routeJson = null, incidents = displayedIncidents, onViewportBounds = { mapViewportBounds = it })
+            RoutePlannerMapView(routeJson = RoutePlanStore.coordinatesJson, incidents = displayedIncidents, onViewportBounds = { mapViewportBounds = it })
             Column(Modifier.align(Alignment.TopStart).padding(9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(color = Color(0xE619252F), shape = RoundedCornerShape(7.dp)) {
                     Column(Modifier.padding(horizontal = 9.dp, vertical = 7.dp)) {
