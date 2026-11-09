@@ -2838,18 +2838,13 @@ window.haulwayFollowRequest=function(){autoFollow=true;if(lastVehicle){const old
 window.haulwaySetFollowMode=function(enabled){autoFollow=!!enabled;if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);scheduleRender();}else{drawOverlays();}applyMapOrientation();};
 window.haulwaySetTilt3D=function(enabled){tilt3D=!!enabled;applyMapOrientation();};
 window.haulwayApplyAppearance=function(mode,style){
- if(!CARTO_API_KEY){console.warn('Map appearance saved; CARTO key is not present in this APK');return;}
- const effective=(mode==='Auto')?(new Date().getHours()>=19||new Date().getHours()<7?'Dark Matter':'Voyager'):((mode==='Night')?'Dark Matter':'Positron');
- const chosen=effective;
- const target=chosen==='Dark Matter'?0:(chosen==='Voyager'?1:2);
- if(provider!==target){provider=target;const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[provider].attr+' · '+providers[provider].name;showStatus('LOADING '+providers[provider].name.toUpperCase()+'…');render();}
+ // The shared OSM raster source currently has one neutral basemap style.
+ const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[0].attr+' · HAULWAY';
 };
 window.haulwaySetMapStyleRequest=function(){
- if(!CARTO_API_KEY){showStatus('CARTO API KEY MISSING — ADD CARTO_API_KEY TO local.properties OR GITHUB SECRET');console.warn('Layers unavailable: CARTO_API_KEY was empty at build time');return;}
- // The Layers control cycles only the three CARTO basemaps. OSM is fallback-only.
- provider=(provider+1)%cartoProviders.length;
- const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[provider].attr+' · '+providers[provider].name;
- showStatus('LOADING '+providers[provider].name.toUpperCase()+'…');render();
+ provider=0;
+ const attr=document.querySelector('.attribution');if(attr)attr.textContent=providers[0].attr+' · HAULWAY';
+ showStatus('OPENSTREETMAP BASEMAP');render();
 };
 window.haulwaySetHeadingUp=function(enabled){headingUp=!!enabled;applyMapOrientation();};
 let panFrame=0,panVelocity={x:0,y:0},lastPointer={x:0,y:0,t:0},panOffset={x:0,y:0};
@@ -4961,7 +4956,7 @@ private fun SettingsVision10(modifier: Modifier = Modifier) {
                                 }
                             }
                         }
-                        Text("CARTO BASEMAP · ${mapStyle.uppercase()} · tap style to change", color = Color(0xFF7F9BAD), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("OPENSTREETMAP BASEMAP · ${mapStyle.uppercase()}", color = Color(0xFF7F9BAD), fontSize = 9.sp, fontWeight = FontWeight.Bold)
                     }
                     else -> {
                         Text("${selected} options", color = Color(0xFF9FB4C4), fontSize = 13.sp)
