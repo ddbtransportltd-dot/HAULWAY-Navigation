@@ -739,7 +739,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             runCatching {
                 // Query a wider corridor and retry a second public Overpass instance.
                 // UK defaults are used only where the road class gives a recognised HGV limit.
-                val query = "[out:json][timeout:12];way(around:180,$lat,$lon)[highway];out geom tags;"
+                val query = "[out:json][timeout:12];way(around:350,$lat,$lon)[highway];out geom tags;"
                 val endpoints = listOf("https://overpass.kumi.systems/api/interpreter", "https://overpass-api.de/api/interpreter")
                 var responseText: String? = null
                 for (base in endpoints) {
@@ -765,11 +765,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
                     val highway = tags.optString("highway").lowercase(Locale.UK)
-                    val hgvRaw = tags.optString("maxspeed:hgv").ifBlank {
-                        tags.optString("maxspeed:forward").ifBlank { tags.optString("maxspeed") }
-                    }.trim().lowercase(Locale.UK)
+                    val hgvRaw = tags.optString("maxspeed:hgv").trim().lowercase(Locale.UK)
                     val numeric = Regex("\\d+(?:\\.\\d+)?").find(hgvRaw)?.value?.toDoubleOrNull()
-                    val explicit = when {
+                    val explicitHgv = when {
                         "nsl_single" in hgvRaw -> 40.0
                         "nsl_dual" in hgvRaw -> 50.0
                         "motorway" in hgvRaw -> 60.0
@@ -779,7 +777,9 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                     val dual = tags.optString("dual_carriageway").equals("yes", true) ||
                         tags.optString("divided").equals("yes", true) ||
-                        tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2
+                        (tags.optString("lanes").toIntOrNull() ?: 0) >= 4 ||
+                        (tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2)
+                    // UK national HGV limits, not the ordinary car maxspeed tag.
                     val ukHgvDefault = when (highway) {
                         "motorway" -> 60.0
                         "motorway_link" -> 40.0
@@ -788,7 +788,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         "trunk", "primary", "secondary", "tertiary" -> if (dual) 50.0 else 40.0
                         else -> null
                     }
-                    val mph = explicit ?: ukHgvDefault ?: continue
+                    val mph = explicitHgv ?: ukHgvDefault ?: continue
                     val geometry = item.optJSONArray("geometry") ?: continue
                     var wayDistance = Double.MAX_VALUE
                     var previousX: Double? = null
@@ -814,7 +814,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         nearestValue = mph.toInt()
                     }
                 }
-                if (nearestDistance <= 140.0) nearestValue else null
+                if (nearestDistance <= 260.0) nearestValue else null
             }.onFailure { android.util.Log.w("HAULWAY_SPEED", "Could not resolve current HGV speed limit", it) }.getOrNull()
         }
     }
@@ -1133,21 +1133,21 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         else -> "FOLLOW ROUTE MARKINGS"
                     }
                     Surface(
-                        Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 10.dp),
+                        Modifier.align(Alignment.TopCenter).fillMaxWidth(0.8f).padding(top = 8.dp),
                         shape = RoundedCornerShape(14.dp),
                         color = Color(0xB80A171D),
                         border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xAA168FE8)),
                         shadowElevation = 8.dp
                     ) {
-                        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
-                                    Icon(maneuverIconFor(maneuver.label), null, tint = White, modifier = Modifier.size(43.dp))
+                                    Icon(maneuverIconFor(maneuver.label), null, tint = White, modifier = Modifier.size(34.dp))
                                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                         Text(distanceToManeuver?.let(::formatNavigationDistance) ?: "—",
-                                            color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                            color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                                         Text(if (exitNumber != null && "roundabout" in instruction) "ROUNDABOUT · EXIT $exitNumber" else maneuver.label.uppercase(Locale.UK),
-                                            color = Color(0xFFBDE8FF), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            color = Color(0xFFBDE8FF), fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                     }
                                 }
                                 if (exitNumber != null) {
@@ -1165,15 +1165,15 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             }
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                                 if (liveSpeedLimitMph != null) {
-                                    Surface(shape = CircleShape, color = Color.White, border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD71920)), modifier = Modifier.size(47.dp)) {
+                                    Surface(shape = CircleShape, color = Color.White, border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD71920)), modifier = Modifier.size(42.dp)) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Text(liveSpeedLimitMph.toString(), color = Color(0xFF111111), fontSize = 18.sp, fontWeight = FontWeight.Black)
+                                            Text(liveSpeedLimitMph.toString(), color = Color(0xFF111111), fontSize = 16.sp, fontWeight = FontWeight.Black)
                                         }
                                     }
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                                    Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                    Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 }
                                 Icon(Icons.Default.Navigation, null, tint = Color(0xFFFFD166), modifier = Modifier.size(27.dp))
                             }
@@ -2284,9 +2284,9 @@ private fun HaulwayNativeMapCanvas(
                         }
                     }
                 }
-                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
+                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(32)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "node(around:250,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];node(around:250,$centerLat,$centerLon)[maxspeed:hgv];way(around:250,$centerLat,$centerLon)[highway][maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed:hgv];"
+                    "node(around:450,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];node(around:250,$centerLat,$centerLon)[maxspeed:hgv];way(around:450,$centerLat,$centerLon)[highway][maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed:hgv];"
                 }
                 val query = "[out:json][timeout:18];($clauses);out center tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
@@ -2348,7 +2348,7 @@ private fun HaulwayNativeMapCanvas(
                     val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
                     val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
                     if (!latValue.isFinite() || !lonValue.isFinite()) continue
-                    if (routeDistanceMetres(latValue, lonValue) > 35.0) continue
+                    if (routeDistanceMetres(latValue, lonValue) > 120.0) continue
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
                     val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
