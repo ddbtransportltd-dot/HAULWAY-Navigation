@@ -2331,7 +2331,7 @@ private fun HaulwayNativeMapCanvas(
                 val routePointsForFilter = org.json.JSONArray(routeJson)
                 if (!routeJson.isNullOrBlank()) {
                     val routePoints = org.json.JSONArray(routeJson)
-                    val sampleCount = minOf(24, routePoints.length())
+                    val sampleCount = minOf(32, routePoints.length())
                     for (sample in 0 until sampleCount) {
                         val index = if (sampleCount <= 1) 0 else (sample.toDouble() * (routePoints.length() - 1) / (sampleCount - 1)).toInt()
                         val coordinate = routePoints.optJSONArray(index) ?: continue
@@ -2344,9 +2344,11 @@ private fun HaulwayNativeMapCanvas(
                 }
                 val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];node(around:180,$centerLat,$centerLon)[traffic_sign~\"maxspeed\"];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][traffic_sign~\"maxspeed\"];);"
+                    "(node(around:220,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:220,$centerLat,$centerLon)[maxspeed];node(around:220,$centerLat,$centerLon)[maxspeed:hgv];node(around:220,$centerLat,$centerLon)[traffic_sign~\"maxspeed\"];way(around:220,$centerLat,$centerLon)[highway][maxspeed];way(around:220,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:220,$centerLat,$centerLon)[highway][traffic_sign~\"maxspeed\"];);"
                 }
-                val query = "[out:json][timeout:25];($clauses);out center tags;"
+                // Request way geometry as well as tags: a road's geometric centre can sit
+                // more than 120m from the route even when its carriageway follows the route.
+                val query = "[out:json][timeout:30];($clauses);out geom tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
                 var responseText: String? = null
                 for (endpointBase in endpoints) {
@@ -2406,10 +2408,28 @@ private fun HaulwayNativeMapCanvas(
                         }
                         else -> continue
                     }
-                    val latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
-                    val lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
+                    val geometry = item.optJSONArray("geometry")
+                    var latValue = if (item.has("lat")) item.optDouble("lat") else item.optJSONObject("center")?.optDouble("lat", Double.NaN) ?: Double.NaN
+                    var lonValue = if (item.has("lon")) item.optDouble("lon") else item.optJSONObject("center")?.optDouble("lon", Double.NaN) ?: Double.NaN
+                    var nearestRouteDistance = if (latValue.isFinite() && lonValue.isFinite()) routeDistanceMetres(latValue, lonValue) else Double.MAX_VALUE
+                    // For ways, compare every returned geometry vertex with the route rather
+                    // than rejecting the whole road by its centre point.
+                    if (geometry != null && geometry.length() > 0) {
+                        for (pointIndex in 0 until geometry.length()) {
+                            val point = geometry.optJSONObject(pointIndex) ?: continue
+                            val pointLat = point.optDouble("lat", Double.NaN)
+                            val pointLon = point.optDouble("lon", Double.NaN)
+                            if (!pointLat.isFinite() || !pointLon.isFinite()) continue
+                            val distance = routeDistanceMetres(pointLat, pointLon)
+                            if (distance < nearestRouteDistance) {
+                                nearestRouteDistance = distance
+                                latValue = pointLat
+                                lonValue = pointLon
+                            }
+                        }
+                    }
                     if (!latValue.isFinite() || !lonValue.isFinite()) continue
-                    if (routeDistanceMetres(latValue, lonValue) > 120.0) continue
+                    if (nearestRouteDistance > 220.0) continue
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
                     val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
