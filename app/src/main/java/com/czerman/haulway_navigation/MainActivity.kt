@@ -2434,8 +2434,8 @@ private fun HaulwayNativeMapCanvas(
                     if (nearestRouteDistance > 220.0) continue
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
-                    val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
-                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", label).put("kind", kind)))
+                    val pointGeometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
+                    features.put(JSONObject().put("type", "Feature").put("geometry", pointGeometry).put("properties", JSONObject().put("label", label).put("kind", kind)))
                 }
                 JSONObject().put("type", "FeatureCollection").put("features", features).toString()
             }.onFailure { android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign data unavailable", it) }.getOrNull()
