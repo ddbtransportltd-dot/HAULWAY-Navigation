@@ -2575,7 +2575,7 @@ private fun HaulwayNativeMapCanvas(
         }
     }
 
-    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver) {
+    LaunchedEffect(mapLibreMap, globeMode, zoom, latitude, longitude, bearing, followRequest, followEnabled, forceGpsRecenter, tilt3D, distanceToManeuver, searchLocation, searchLocationFocusPending) {
         val map = mapLibreMap ?: return@LaunchedEffect
         // The globe must use the full, symmetric viewport. The forward-view camera
         // offset belongs only to turn-by-turn driving mode; applying it to the globe
