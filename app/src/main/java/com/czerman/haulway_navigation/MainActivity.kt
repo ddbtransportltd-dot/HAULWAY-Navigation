@@ -2042,7 +2042,7 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
     }
 }
 
-private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+private const val HAULWAY_NATIVE_MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/dark"
 
 private object HaulwayGpsMarkerAnimation {
     var latitude: Double? = null
@@ -2236,7 +2236,7 @@ private fun HaulwayNativeMapCanvas(
     var styleError by remember { mutableStateOf<String?>(null) }
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
     val styleCachePrefs = remember(context) { context.getSharedPreferences("haulway_map_style_cache", Context.MODE_PRIVATE) }
-    var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_style_$selectedNativeMapStyle", null)) }
+    var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("openfreemap_style_$selectedNativeMapStyle", null)) }
     var roadSignsJson by remember { mutableStateOf<String?>(null) }
     var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
     var lastRoadSignsRouteKey by remember { mutableStateOf("") }
@@ -2245,9 +2245,9 @@ private fun HaulwayNativeMapCanvas(
     val latestGpsLongitude by rememberUpdatedState(longitude)
     // The map Layers button cycles real MapLibre basemaps (no API key required).
     val nativeMapStyles = listOf(
-        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-        "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
-        "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+        "https://tiles.openfreemap.org/styles/dark",
+        "https://tiles.openfreemap.org/styles/bright",
+        "https://tiles.openfreemap.org/styles/positron"
     )
     LaunchedEffect(mapStyleRequest) {
         if (mapStyleRequest > 0) selectedNativeMapStyle = (selectedNativeMapStyle + 1) % nativeMapStyles.size
@@ -2452,7 +2452,7 @@ private fun HaulwayNativeMapCanvas(
                     cachedStyleJson = it
                     // Keep the last valid style locally so the globe does not need to
                     // download the style document again on every app/map recreation.
-                    styleCachePrefs.edit().putString("carto_style_$selectedNativeMapStyle", it).apply()
+                    styleCachePrefs.edit().putString("openfreemap_style_$selectedNativeMapStyle", it).apply()
                 }
             }
 
@@ -2631,22 +2631,15 @@ private fun RealNavigationMap(
 private val NAVIGATION_MAP_HTML = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#17232b"><link rel="icon" href="data:,"><style>
 *{box-sizing:border-box}html,body{height:100%;width:100%;min-height:100%;margin:0;overflow:hidden;background:#17232b;font-family:Arial,sans-serif}#map{position:fixed;inset:0;width:100vw;height:100vh;min-height:100%;overflow:hidden;background:#17232b;touch-action:none}#mapscene{position:absolute;inset:0;transform:none;transform-origin:50% 50%;will-change:transform}#tiles{position:absolute;inset:0;overflow:hidden}#tileworld{position:absolute;left:50%;top:50%;transform-origin:0 0}.tile{position:absolute;width:256px;height:256px;border:0;user-select:none;-webkit-user-drag:none;backface-visibility:hidden;image-rendering:auto}.tile.failed{opacity:0}#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:4;pointer-events:none;overflow:visible}#roadmarkers{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}#trafficlines{position:absolute;inset:0;width:100%;height:100%;z-index:6;pointer-events:none;overflow:visible}#trafficmarkers{position:absolute;inset:0;z-index:7;pointer-events:none;overflow:hidden}.traffic-marker{position:absolute;transform:translate(-50%,-50%);width:25px;height:25px;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font:bold 12px Arial;box-shadow:0 2px 7px #000d;text-shadow:0 1px 2px #000}.traffic-marker.accident,.traffic-marker.brokenDownVehicle{background:#d92736}.traffic-marker.jam{background:#e58a19}.traffic-marker.roadworks,.traffic-marker.laneClosed,.traffic-marker.roadClosed{background:#ef6c24}.traffic-marker.fog,.traffic-marker.rain,.traffic-marker.ice,.traffic-marker.wind,.traffic-marker.flooding,.traffic-marker.dangerousConditions{background:#287eae}.traffic-marker.other{background:#7253a6}.road-marker{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;font:bold 10px Arial;filter:drop-shadow(0 2px 3px #000c);white-space:nowrap}.road-marker.stop{width:31px;height:31px;background:#e31b23;color:#fff;border:2px solid #fff;clip-path:polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%)}.road-marker.giveway{width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-top:29px solid #e21b2d;filter:drop-shadow(0 0 2px #111)}.road-marker.giveway:after{content:'';position:absolute;top:-27px;left:-13px;border-left:13px solid transparent;border-right:13px solid transparent;border-top:23px solid #fff}.road-marker.speed{width:32px;height:32px;border-radius:50%;background:#fff;border:5px solid #d71920;color:#111;font-size:12px}.road-marker.camera{width:29px;height:29px;border-radius:50%;background:#f3d21b;border:2px solid #111;color:#111;font-size:15px}.road-marker.signal{width:18px;height:35px;border-radius:5px;background:#20252a;border:2px solid #eee;display:flex;flex-direction:column;gap:2px}.road-marker.signal:before,.road-marker.signal:after{content:'';width:8px;height:8px;border-radius:50%;background:#687078}.road-marker.signal span{width:8px;height:8px;border-radius:50%;background:#687078}.road-marker.camera{background:#f3d21b}.road-marker.parking,.road-marker.fuel,.road-marker.truckpark,.road-marker.poi{min-width:25px;height:25px;padding:0 4px;border:2px solid #fff;border-radius:4px;background:#087ccb;color:#fff;font-size:14px}.road-marker.fuel{background:#167b48}.road-marker.truckpark{background:#7650a8;font-size:10px}.road-marker.poi{background:#344b5d;font-size:11px}.road-marker-label{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:2px;padding:2px 4px;border-radius:3px;background:#081018dd;color:#fff;font:9px Arial}.poi-marker{position:absolute;transform:translate(-50%,-50%);width:29px;height:29px;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font:bold 11px Arial;box-shadow:0 2px 7px #000c;text-shadow:0 1px 2px #000}.poi-marker.fuel{background:#e74b25}.poi-marker.parking{background:#087cc5}.poi-marker.restaurant{background:#d58b20}.poi-marker.shop{background:#7d59a6}.poi-marker.service{background:#278e64}.poi-marker.shell{background:#e33428}.poi-marker.bp{background:#168b4a}.poi-marker.esso{background:#1769b4}.poi-marker-label{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:2px;padding:2px 4px;border-radius:3px;background:#081018e8;color:#fff;font:9px Arial;white-space:nowrap}#poiroads{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}#poimarkers{position:absolute;inset:0;z-index:8;pointer-events:none;overflow:hidden}#mapstatus{display:none;position:absolute;z-index:10;left:50%;top:50%;transform:translate(-50%,-50%);padding:11px 15px;border:1px solid #168fe8;border-radius:8px;background:rgba(8,16,22,.94);color:#fff;font:600 12px Arial;text-align:center;max-width:85%;pointer-events:none;box-shadow:0 5px 24px #0008}.vehicle{position:absolute;z-index:5;width:28px;height:36px;margin:-18px 0 0 -14px;filter:drop-shadow(0 4px 5px #000f);pointer-events:none;transform-origin:50% 50%}.vehicle:before{content:'';position:absolute;left:1px;top:1px;border-left:13px solid transparent;border-right:13px solid transparent;border-bottom:34px solid #078ee8;filter:drop-shadow(0 0 2px #fff) drop-shadow(0 2px 0 #00131f)}.vehicle:after{content:'';position:absolute;left:9px;top:10px;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:17px solid #fff}.attribution{position:absolute;right:4px;bottom:3px;padding:2px 4px;background:#081018aa;color:#dce5eb;font-size:9px;z-index:6}
-</style></head><body><div id="map"><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><div id="roadmarkers"></div><div id="poimarkers"></div><svg id="poiroads"></svg><svg id="trafficlines"></svg><div id="trafficmarkers"></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg></div><div id="vehicle" class="vehicle" style="display:none"></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© CARTO · © OpenStreetMap data · HAULWAY Dark</div></div>
+</style></head><body><div id="map"><div id="mapscene"><div id="tiles"><div id="tileworld"></div></div><div id="roadmarkers"></div><div id="poimarkers"></div><svg id="poiroads"></svg><svg id="trafficlines"></svg><div id="trafficmarkers"></div><svg id="overlay"><polyline id="routecasing" fill="none" stroke="#062d4e" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><polyline id="route" fill="none" stroke="#168fe8" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><circle id="routeStart" r="8" fill="#35a65b" stroke="#fff" stroke-width="3" style="display:none"/><circle id="routeEnd" r="8" fill="#e34b4b" stroke="#fff" stroke-width="3" style="display:none"/></svg></div><div id="vehicle" class="vehicle" style="display:none"></div><div id="mapstatus">LOADING ROAD MAP…</div><div class="attribution">© OpenStreetMap contributors · HAULWAY</div></div>
 <script>
 (function(){'use strict';
 const root=document.getElementById('map'),scene=document.getElementById('mapscene'),world=document.getElementById('tileworld'),status=document.getElementById('mapstatus'),overlay=document.getElementById('overlay'),vehicle=document.getElementById('vehicle'),roadMarkers=document.getElementById('roadmarkers'),trafficMarkers=document.getElementById('trafficmarkers'),trafficLines=document.getElementById('trafficlines'),poiMarkers=document.getElementById('poimarkers'),poiRoads=document.getElementById('poiroads');
 console.log('HAULWAY native tile map script started');
- const CARTO_API_KEY=${JSONObject.quote(BuildConfig.CARTO_API_KEY)};
-window.addEventListener('error',e=>console.error('Map JS error: '+e.message+' line '+e.lineno));
-const cartoProviders=[
- {name:'HAULWAY Dark',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/dark_all/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Voyager',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/rastertiles/voyager/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'},
- {name:'HAULWAY Light',url:(z,x,y)=>`https://${'$'}{['a','b','c','d'][(x+y)%4]}.basemaps.cartocdn.com/light_all/${'$'}{z}/${'$'}{x}/${'$'}{y}@2x.png?key=${'$'}{encodeURIComponent(CARTO_API_KEY)}`,attr:'© CARTO · © OpenStreetMap data'}
-];
-const openStreetMapProvider={name:'OpenStreetMap fallback',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
-/* CARTO requires its own Basemaps key. Do not request CARTO tiles with an empty key:
-   they return HTTP 200 with an API KEY REQUIRED watermark. */
-const providers=CARTO_API_KEY ? [...cartoProviders,openStreetMapProvider] : [openStreetMapProvider];
+ window.addEventListener('error',e=>console.error('Map JS error: '+e.message+' line '+e.lineno));
+const openStreetMapProvider={name:'OpenStreetMap',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
+const providers=[openStreetMapProvider];
+/* Route, Traffic and Services use the same OpenStreetMap data source without a CARTO key. */
 let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,targetVehicle=null,vehicleAnimFrom=null,vehicleAnimStarted=0,vehicleAnimationFrame=0,autoFollow=true,firstFix=true,headingUp=true,tilt3D=true,drag=null,failed=0,loaded=0,providerTimer=null;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
@@ -2801,13 +2794,13 @@ function fetchPoiCategory(category){
 }
 window.haulwaySetPoiCategory=function(category){
  activePoiCategory=String(category||'fuel');center={lat:53.4808,lon:-2.2426};zoom=11;autoFollow=false;tilt3D=false;routeCoords=[];
- if(CARTO_API_KEY){provider=1;}else{provider=0;}
+ provider=0;
  poiFeatures=[];poiRoadGeometry=[];drawPoiMarkers();
- const attr=document.querySelector('.attribution');if(attr)attr.textContent=(providers[provider]||openStreetMapProvider).attr+' · HAULWAY Voyager';
+ const attr=document.querySelector('.attribution');if(attr)attr.textContent=(providers[provider]||openStreetMapProvider).attr+' · HAULWAY';
  showStatus('LOADING MAP & NEARBY SERVICES…');render();fetchPoiCategory(activePoiCategory);
 };
 window.haulwayClearPoiCategory=function(){activePoiCategory='';poiFeatures=[];poiRoadGeometry=[];drawPoiMarkers();};
-window.haulwaySetMapTheme=function(theme){if(activePoiCategory)return;const next=theme==='voyager'&&CARTO_API_KEY?1:0;if(provider!==next){provider=next;const attr=document.querySelector('.attribution');if(attr)attr.textContent=(providers[provider]||openStreetMapProvider).attr+' · HAULWAY '+(theme==='voyager'?'Voyager':'Dark');render();}};
+window.haulwaySetMapTheme=function(theme){if(activePoiCategory)return;const next=0;if(provider!==next){provider=next;const attr=document.querySelector('.attribution');if(attr)attr.textContent=(providers[provider]||openStreetMapProvider).attr+' · HAULWAY';render();}};
 
 window.haulwaySetZoom=function(offset){const next=clamp(12+Number(offset||0),3,19);if(next!==zoom){zoom=next;scheduleRender();}};
 window.haulwaySetRoute=function(json){try{const raw=JSON.parse(json);routeCoords=raw.map(c=>[Number(c[1]),Number(c[0])]).filter(c=>Number.isFinite(c[0])&&Number.isFinite(c[1]));if(routeCoords.length<2)throw Error('Route geometry empty');if(autoFollow&&lastVehicle){center={lat:lastVehicle.lat,lon:lastVehicle.lon};zoom=Math.max(zoom,16);}else{const lats=routeCoords.map(c=>c[0]),lons=routeCoords.map(c=>c[1]);center={lat:(Math.min(...lats)+Math.max(...lats))/2,lon:(Math.min(...lons)+Math.max(...lons))/2};const span=Math.max(Math.abs(Math.max(...lats)-Math.min(...lats)),Math.abs(Math.max(...lons)-Math.min(...lons)));zoom=clamp(Math.floor(Math.log2(360/Math.max(span,.002)))-1,5,16);}scheduleRender();}catch(e){showStatus('ROUTE DISPLAY ERROR');console.error('Route error '+e);}};
