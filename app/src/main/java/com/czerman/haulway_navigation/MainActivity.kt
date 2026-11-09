@@ -814,7 +814,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         nearestValue = mph.toInt()
                     }
                 }
-                if (nearestDistance <= 260.0) nearestValue else null
+                if (nearestDistance <= 500.0) nearestValue else null
             }.onFailure { android.util.Log.w("HAULWAY_SPEED", "Could not resolve current HGV speed limit", it) }.getOrNull()
         }
     }
@@ -2304,7 +2304,7 @@ private fun HaulwayNativeMapCanvas(
                 val routePointsForFilter = org.json.JSONArray(routeJson)
                 if (!routeJson.isNullOrBlank()) {
                     val routePoints = org.json.JSONArray(routeJson)
-                    val sampleCount = minOf(50, routePoints.length())
+                    val sampleCount = minOf(24, routePoints.length())
                     for (sample in 0 until sampleCount) {
                         val index = if (sampleCount <= 1) 0 else (sample.toDouble() * (routePoints.length() - 1) / (sampleCount - 1)).toInt()
                         val coordinate = routePoints.optJSONArray(index) ?: continue
@@ -2315,11 +2315,11 @@ private fun HaulwayNativeMapCanvas(
                         }
                     }
                 }
-                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(32)
+                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "node(around:450,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];node(around:250,$centerLat,$centerLon)[maxspeed:hgv];way(around:450,$centerLat,$centerLon)[highway][maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed:hgv];"
+                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];);"
                 }
-                val query = "[out:json][timeout:18];($clauses);out center tags;"
+                val query = "[out:json][timeout:25];($clauses);out center tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
                 var responseText: String? = null
                 for (endpointBase in endpoints) {
