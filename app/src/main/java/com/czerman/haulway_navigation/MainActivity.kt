@@ -262,7 +262,8 @@ private suspend fun calculateRoadRoute(
     strategy: String,
     context: Context,
     liveOrigin: Pair<Double, Double>? = null,
-    avoidPoints: List<Pair<Double, Double>> = emptyList()
+    avoidPoints: List<Pair<Double, Double>> = emptyList(),
+    destinationCoordinates: Pair<Double, Double>? = null
 ): RouteResult = withContext(Dispatchers.IO) {
     require(locations.size >= 2) { "Add at least a start and destination" }
     val apiKey = BuildConfig.ORS_API_KEY.trim()
@@ -326,6 +327,8 @@ private suspend fun calculateRoadRoute(
     locations.forEachIndexed { index, place ->
         if (place.equals("CURRENT LOCATION", ignoreCase = true)) {
             points.add(liveOrigin ?: resolveHaulwayCurrentLocation(context))
+        } else if (index == locations.lastIndex && destinationCoordinates != null) {
+            points.add(destinationCoordinates)
         } else {
             if (index > 0) kotlinx.coroutines.delay(1100) // Public Nominatim usage policy.
             points.add(geocode(place))
@@ -919,13 +922,13 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 }
                 val distanceFromRoute = distanceToRouteMetres(location.latitude, location.longitude, RoutePlanStore.coordinatesJson)
                 if (distanceFromRoute != null && accuracy <= 45f) {
-                    if (distanceFromRoute > maxOf(75.0, accuracy.toDouble() * 1.8)) offRouteReadings++ else offRouteReadings = 0
+                    if (distanceFromRoute > maxOf(55.0, accuracy.toDouble() * 1.5)) offRouteReadings++ else offRouteReadings = 0
                     if (offRouteReadings >= 3) offRoute = true
                     if (distanceFromRoute < maxOf(35.0, accuracy.toDouble())) { offRoute = false; offRouteReadings = 0 }
                     // Recalculate from the live position to the saved destination. Never wait
                     // for the driver to return to the original route. Throttle API requests.
                     val now = System.currentTimeMillis()
-                    if (offRoute && !rerouteInProgress && now - lastRerouteAt > 20_000L &&
+                    if (offRoute && !rerouteInProgress && now - lastRerouteAt > 8_000L &&
                         RoutePlanStore.destination.isNotBlank() && BuildConfig.ORS_API_KEY.isNotBlank()) {
                         rerouteInProgress = true
                         lastRerouteAt = now
@@ -934,7 +937,11 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                 val updated = calculateRoadRoute(
                                     listOf("CURRENT LOCATION", RoutePlanStore.destination),
                                     "FASTEST", appContext, location.longitude to location.latitude,
-                                    RoutePlanStore.avoidPoints
+                                    RoutePlanStore.avoidPoints,
+                                    destinationCoordinates = runCatching {
+                                        val routeEnd = org.json.JSONArray(activeRouteJson).getJSONArray(org.json.JSONArray(activeRouteJson).length() - 1)
+                                        routeEnd.getDouble(0) to routeEnd.getDouble(1)
+                                    }.getOrNull()
                                 )
                                 RoutePlanStore.coordinatesJson = updated.coordinatesJson
                                 RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
@@ -951,7 +958,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                 lastSpokenStage = ""
                             } catch (error: Exception) {
                                 // Keep the warning visible and allow a later retry.
-                                lastRerouteAt = System.currentTimeMillis() - 15_000L
+                                lastRerouteAt = System.currentTimeMillis() - 7_000L
                             } finally { rerouteInProgress = false }
                         }
                     }
@@ -1336,6 +1343,68 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     }
                     Text("HAULWAY will calculate a new HGV route around the selected road or area. Avoidance zones are temporary and remain active for this route.",
                         color = Color(0xFFB8C7D1), fontSize = 11.sp)
+                    Surface(
+                        Modifier.fillMaxWidth().clickable {
+                            val lat = liveLatitude
+                            val lon = liveLongitude
+                            val routeJson = RoutePlanStore.coordinatesJson
+                            if (lat == null || lon == null || routeJson.isNullOrBlank() || RoutePlanStore.destination.isBlank()) {
+                                Toast.makeText(appContext, "Start navigation and wait for a GPS fix before finding an alternative.", Toast.LENGTH_LONG).show()
+                            } else {
+                                val diversion = pointAheadOnRoute(lat, lon, routeJson, 1200.0)
+                                    ?: pointAheadOnRoute(lat, lon, routeJson, 600.0)
+                                if (diversion == null) {
+                                    Toast.makeText(appContext, "Could not find a suitable section ahead to avoid.", Toast.LENGTH_LONG).show()
+                                } else {
+                                    avoidActionBusy = true
+                                    mapSearchScope.launch {
+                                        try {
+                                            val routeEnd = org.json.JSONArray(routeJson).let { points ->
+                                                val end = points.getJSONArray(points.length() - 1)
+                                                end.getDouble(0) to end.getDouble(1)
+                                            }
+                                            val newAvoid = (RoutePlanStore.avoidPoints + diversion).distinct()
+                                            val updated = calculateRoadRoute(
+                                                listOf("CURRENT LOCATION", RoutePlanStore.destination),
+                                                "FASTEST", appContext, lon to lat, newAvoid, routeEnd
+                                            )
+                                            RoutePlanStore.avoidPoints = newAvoid
+                                            RoutePlanStore.coordinatesJson = updated.coordinatesJson
+                                            RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
+                                            RoutePlanStore.maneuvers = updated.maneuvers
+                                            RoutePlanStore.steps = updated.steps
+                                            RoutePlanStore.origin = "CURRENT LOCATION"
+                                            remainingDistanceMetres = updated.totalDistanceMetres
+                                            remainingDurationSeconds = updated.totalDurationSeconds
+                                            activeManeuverIndex = 0
+                                            offRoute = false
+                                            offRouteReadings = 0
+                                            lastRerouteAt = System.currentTimeMillis()
+                                            lastSpokenStage = ""
+                                            Toast.makeText(appContext, "Alternative HGV route calculated.", Toast.LENGTH_LONG).show()
+                                            showRouteAvoidDialog = false
+                                        } catch (e: Exception) {
+                                            Toast.makeText(appContext, e.localizedMessage ?: "Could not calculate an alternative route.", Toast.LENGTH_LONG).show()
+                                        } finally { avoidActionBusy = false }
+                                    }
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(9.dp), color = Color(0xFF173B31),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF39B879))
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AltRoute, null, tint = Color(0xFF79E0A9))
+                            Spacer(Modifier.width(9.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("FIND ALTERNATIVE ROUTE", color = White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Recalculate around the road ahead while keeping HGV restrictions.", color = Color(0xFFB8C7D1), fontSize = 10.sp)
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF79E0A9))
+                        }
+                    }
                     Surface(
                         Modifier.fillMaxWidth().clickable {
                             val lat = liveLatitude; val lon = liveLongitude
@@ -2139,6 +2208,8 @@ private fun HaulwayNativeMapCanvas(
     var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
     var lastRoadSignsRouteKey by remember { mutableStateOf("") }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
+    val latestGpsLatitude by rememberUpdatedState(latitude)
+    val latestGpsLongitude by rememberUpdatedState(longitude)
     // Use the same CARTO Dark Matter family as the embedded POI/parking/traffic maps.
     val activeStyleUrl = HAULWAY_NATIVE_MAP_STYLE_URL
 
@@ -2161,6 +2232,25 @@ private fun HaulwayNativeMapCanvas(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onDestroy()
+        }
+    }
+
+    // Keep the opening globe visible briefly, then automatically fly to the live GPS fix.
+    // The timer starts once the map instance is ready; if GPS takes a moment, wait for it.
+    LaunchedEffect(mapLibreMap) {
+        if (mapLibreMap == null) return@LaunchedEffect
+        delay(5_000)
+        var waitedMs = 0
+        while ((latestGpsLatitude == null || latestGpsLongitude == null) && waitedMs < 25_000) {
+            delay(500)
+            waitedMs += 500
+        }
+        if (latestGpsLatitude != null && latestGpsLongitude != null) {
+            globeMode = false
+            forceGpsRecenter = true
+            android.util.Log.i("HAULWAY_MAPLIBRE", "Automatic globe-to-GPS zoom triggered after 5 seconds")
+        } else {
+            android.util.Log.w("HAULWAY_MAPLIBRE", "Automatic globe zoom waiting for GPS; no fix available yet")
         }
     }
 
