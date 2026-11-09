@@ -1229,7 +1229,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 // Map controls on lower-right edge of map.
                 Column(Modifier.align(Alignment.CenterEnd).padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Surface(Modifier.size(38.dp).clickable { mapStyleRequest++ }, shape = RoundedCornerShape(8.dp), color = panel) {
-                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Layers, "Switch road / satellite map", tint = White) }
+                        Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Layers, "Change map appearance: Dark, Voyager, Light", tint = White) }
                     }
                     Surface(Modifier.size(38.dp).clickable { headingUp = !headingUp }, shape = RoundedCornerShape(8.dp), color = if (headingUp) Color(0xFF087CCB) else panel) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Explore, if (headingUp) "Vehicle marker follows compass heading; map stays north-up" else "Vehicle marker points north; map stays north-up", tint = White) }
@@ -2185,21 +2185,30 @@ private fun HaulwayNativeMapCanvas(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var mapLibreMap by remember { mutableStateOf<MapLibreMap?>(null) }
+    var selectedNativeMapStyle by remember { mutableIntStateOf(0) }
     var globeMode by remember { mutableStateOf(true) }
     var forceGpsRecenter by remember { mutableStateOf(false) }
     var styleReady by remember { mutableStateOf(false) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var cachedStyleUrl by remember { mutableStateOf<String?>(null) }
     val styleCachePrefs = remember(context) { context.getSharedPreferences("haulway_map_style_cache", Context.MODE_PRIVATE) }
-    var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_dark_matter_style", null)) }
+    var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("carto_style_$selectedNativeMapStyle", null)) }
     var roadSignsJson by remember { mutableStateOf<String?>(null) }
     var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
     var lastRoadSignsRouteKey by remember { mutableStateOf("") }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
     val latestGpsLatitude by rememberUpdatedState(latitude)
     val latestGpsLongitude by rememberUpdatedState(longitude)
-    // Use the same CARTO Dark Matter family as the embedded POI/parking/traffic maps.
-    val activeStyleUrl = HAULWAY_NATIVE_MAP_STYLE_URL
+    // The map Layers button cycles real MapLibre basemaps (no API key required).
+    val nativeMapStyles = listOf(
+        "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+        "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+    )
+    LaunchedEffect(mapStyleRequest) {
+        if (mapStyleRequest > 0) selectedNativeMapStyle = (selectedNativeMapStyle + 1) % nativeMapStyles.size
+    }
+    val activeStyleUrl = nativeMapStyles[selectedNativeMapStyle]
 
     val mapView = remember(context) {
         MapLibre.getInstance(context)
@@ -2391,7 +2400,7 @@ private fun HaulwayNativeMapCanvas(
                     cachedStyleJson = it
                     // Keep the last valid style locally so the globe does not need to
                     // download the style document again on every app/map recreation.
-                    styleCachePrefs.edit().putString("carto_dark_matter_style", it).apply()
+                    styleCachePrefs.edit().putString("carto_style_$selectedNativeMapStyle", it).apply()
                 }
             }
 
