@@ -1163,24 +1163,30 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     }
                                 }
                             }
-                            // Lane arrows are a visual turn recommendation derived from the active maneuver.
-                            // Exact lane-level data is not supplied by the current routing response.
-                            val turnSide = when {
-                                maneuver.label.contains("left", true) || maneuver.label.contains("uturn", true) -> 0
-                                maneuver.label.contains("right", true) -> 2
-                                else -> 1
-                            }
-                            Row(Modifier.fillMaxWidth().height(42.dp).background(Color(0x66202F3A), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                                for (lane in 0..2) {
-                                    val activeLane = lane == turnSide
-                                    Surface(Modifier.weight(1f).fillMaxHeight(), color = if (activeLane) Color(0xFF087FE5) else Color(0x332C4352), shape = RoundedCornerShape(5.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (activeLane) Color(0xFF8BD5FF) else Color(0x557D91A0))) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                when (lane) { 0 -> Icons.Default.TurnLeft; 1 -> Icons.Default.ArrowUpward; else -> Icons.Default.TurnRight },
-                                                contentDescription = if (activeLane) "Suggested lane" else "Lane",
-                                                tint = if (activeLane) Color.White else Color(0xFF9BAAB5),
-                                                modifier = Modifier.size(27.dp)
-                                            )
+                            // Show lane guidance only when approaching an exit or roundabout.
+                            // Hide it again after the maneuver; never keep lane arrows permanently on screen.
+                            val maneuverText = "${maneuver.label} ${maneuver.roadName}".lowercase(Locale.UK)
+                            val isExitOrRoundabout = listOf("roundabout", "exit", "motorway_link", "slip road", "ramp", "junction").any { maneuverText.contains(it) }
+                            val metresToJunction = distanceToManeuver
+                            val showLaneGuidance = isExitOrRoundabout && metresToJunction != null && metresToJunction in 0.0..500.0
+                            if (showLaneGuidance) {
+                                val turnSide = when {
+                                    maneuverText.contains("left") || maneuverText.contains("1st exit") || maneuverText.contains("first exit") -> 0
+                                    maneuverText.contains("right") || maneuverText.contains("3rd exit") || maneuverText.contains("third exit") -> 2
+                                    else -> 1
+                                }
+                                Row(Modifier.fillMaxWidth().height(42.dp).background(Color(0x66202F3A), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    for (lane in 0..2) {
+                                        val activeLane = lane == turnSide
+                                        Surface(Modifier.weight(1f).fillMaxHeight(), color = if (activeLane) Color(0xFF087FE5) else Color(0x332C4352), shape = RoundedCornerShape(5.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (activeLane) Color(0xFF8BD5FF) else Color(0x557D91A0))) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    when (lane) { 0 -> Icons.Default.TurnLeft; 1 -> Icons.Default.ArrowUpward; else -> Icons.Default.TurnRight },
+                                                    contentDescription = if (activeLane) "Suggested lane" else "Lane",
+                                                    tint = if (activeLane) Color.White else Color(0xFF9BAAB5),
+                                                    modifier = Modifier.size(27.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
