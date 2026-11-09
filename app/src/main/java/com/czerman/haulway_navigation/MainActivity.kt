@@ -2639,7 +2639,7 @@ console.log('HAULWAY native tile map script started');
  window.addEventListener('error',e=>console.error('Map JS error: '+e.message+' line '+e.lineno));
 const openStreetMapProvider={name:'OpenStreetMap',url:(z,x,y)=>`https://${'$'}{['a','b','c'][(x+y)%3]}.tile.openstreetmap.org/${'$'}{z}/${'$'}{x}/${'$'}{y}.png`,attr:'© OpenStreetMap contributors'};
 const providers=[openStreetMapProvider];
-/* Route, Traffic and Services use the same OpenStreetMap data source without a CARTO key. */
+/* Route, Traffic and Services currently use OpenStreetMap raster tiles. */
 let provider=0,center={lat:53.4808,lon:-2.2426},renderedCenter={lat:53.4808,lon:-2.2426},zoom=12,tiles=[],tileCache=new Map(),routeCoords=[],lastVehicle=null,targetVehicle=null,vehicleAnimFrom=null,vehicleAnimStarted=0,vehicleAnimationFrame=0,autoFollow=true,firstFix=true,headingUp=true,tilt3D=true,drag=null,failed=0,loaded=0,providerTimer=null;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function worldPoint(lat,lon,z){const n=256*Math.pow(2,z),x=(lon+180)/360*n,s=Math.sin(lat*Math.PI/180),y=(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n;return{x,y};}
