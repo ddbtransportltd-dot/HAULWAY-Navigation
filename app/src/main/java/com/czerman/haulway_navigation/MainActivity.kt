@@ -731,90 +731,91 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
             val dLon = Math.toRadians(lon - previousLon)
             6371000.0 * kotlin.math.sqrt(dLat * dLat + dLon * dLon * kotlin.math.cos(Math.toRadians(lat)).let { it * it })
         } else Double.MAX_VALUE
-        if (now - lastSpeedLimitFetchAt < 30000L && movedMetres < 100.0) return@LaunchedEffect
+        if (now - lastSpeedLimitFetchAt < 15000L && movedMetres < 45.0) return@LaunchedEffect
         lastSpeedLimitFetchAt = now
         lastSpeedLimitFetchLat = lat
         lastSpeedLimitFetchLon = lon
         liveSpeedLimitMph = withContext(Dispatchers.IO) {
             runCatching {
-                val query = "[out:json][timeout:10];way(around:80,$lat,$lon)[highway];out geom tags;"
-                val url = URL("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(query, "UTF-8"))
-                val connection = url.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 5000
-                connection.readTimeout = 9000
-                try {
-                    val response = connection.inputStream.bufferedReader().use { it.readText() }
-                    val elements = JSONObject(response).optJSONArray("elements") ?: org.json.JSONArray()
-                    var nearestValue: Int? = null
-                    var nearestDistance = Double.MAX_VALUE
-                    val earthRadius = 6371000.0
-                    val cosLatitude = kotlin.math.cos(Math.toRadians(lat))
-                    for (index in 0 until elements.length()) {
-                        val item = elements.optJSONObject(index) ?: continue
-                        val tags = item.optJSONObject("tags") ?: continue
-                        val hgvRaw = tags.optString("maxspeed:hgv", "").trim().lowercase(Locale.UK)
-                        val raw = hgvRaw.ifBlank { tags.optString("maxspeed", "").trim().lowercase(Locale.UK) }
-                        val highway = tags.optString("highway", "").lowercase(Locale.UK)
-                        val dual = tags.optString("dual_carriageway").equals("yes", true) ||
-                            tags.optString("divided").equals("yes", true) ||
-                            (tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2)
-                        val numeric = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value?.toDoubleOrNull()
-                        val parsedMph = when {
-                            "nsl_single" in raw -> 40.0
-                            "nsl_dual" in raw -> 50.0
-                            "motorway" in raw -> 60.0
-                            "living_street" in raw -> 20.0
-                            "urban" in raw || "restricted" in raw -> 30.0
-                            numeric != null && (raw.contains("km/h") || raw.contains("kph")) -> numeric * 0.621371
-                            numeric != null -> numeric
-                            else -> null
-                        }
-                        val statutoryHgvDefault = when (highway) {
-                            "motorway" -> 60.0
-                            "motorway_link" -> 40.0
-                            "living_street" -> 20.0
-                            "residential" -> 30.0
-                            "trunk", "primary", "secondary", "tertiary", "unclassified" -> if (dual) 50.0 else 40.0
-                            else -> null
-                        }
-                        val mph = if (hgvRaw.isNotBlank()) parsedMph
-                            else if (statutoryHgvDefault != null) minOf(parsedMph ?: statutoryHgvDefault, statutoryHgvDefault)
-                            else parsedMph
-                        if (mph == null) continue
-                        val geometry = item.optJSONArray("geometry") ?: continue
-                        var wayDistance = Double.MAX_VALUE
-                        var previousX: Double? = null
-                        var previousY: Double? = null
-                        for (pointIndex in 0 until geometry.length()) {
-                            val point = geometry.optJSONObject(pointIndex) ?: continue
-                            val pointLat = point.optDouble("lat", Double.NaN)
-                            val pointLon = point.optDouble("lon", Double.NaN)
-                            if (!pointLat.isFinite() || !pointLon.isFinite()) continue
-                            val x = Math.toRadians(pointLon - lon) * earthRadius * cosLatitude
-                            val y = Math.toRadians(pointLat - lat) * earthRadius
-                            val ax = previousX
-                            val ay = previousY
-                            if (ax != null && ay != null) {
-                                val dx = x - ax
-                                val dy = y - ay
-                                val lengthSquared = dx * dx + dy * dy
-                                val t = if (lengthSquared > 0.0) ((-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)) else 0.0
-                                val distance = kotlin.math.sqrt((ax + t * dx).let { it * it } + (ay + t * dy).let { it * it })
-                                if (distance < wayDistance) wayDistance = distance
-                            } else {
-                                wayDistance = kotlin.math.min(wayDistance, kotlin.math.sqrt(x * x + y * y))
-                            }
-                            previousX = x
-                            previousY = y
-                        }
-                        if (wayDistance < nearestDistance) {
-                            nearestDistance = wayDistance
-                            nearestValue = mph.toInt()
-                        }
+                // Query a wider corridor and retry a second public Overpass instance.
+                // UK defaults are used only where the road class gives a recognised HGV limit.
+                val query = "[out:json][timeout:12];way(around:180,$lat,$lon)[highway];out geom tags;"
+                val endpoints = listOf("https://overpass.kumi.systems/api/interpreter", "https://overpass-api.de/api/interpreter")
+                var responseText: String? = null
+                for (base in endpoints) {
+                    try {
+                        val endpoint = URL(base + "?data=" + URLEncoder.encode(query, "UTF-8"))
+                        val connection = endpoint.openConnection() as HttpURLConnection
+                        connection.connectTimeout = 6000
+                        connection.readTimeout = 13000
+                        try {
+                            if (connection.responseCode in 200..299) responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                        } finally { connection.disconnect() }
+                        if (!responseText.isNullOrBlank()) break
+                    } catch (error: Exception) {
+                        android.util.Log.w("HAULWAY_SPEED", "Speed-limit Overpass endpoint failed: $base", error)
                     }
-                    if (nearestDistance <= 80.0) nearestValue else null
-                } finally { connection.disconnect() }
-            }.getOrNull()
+                }
+                val elements = JSONObject(responseText ?: throw IllegalStateException("No road speed data returned")).optJSONArray("elements") ?: org.json.JSONArray()
+                var nearestValue: Int? = null
+                var nearestDistance = Double.MAX_VALUE
+                val earthRadius = 6371000.0
+                val cosLatitude = kotlin.math.cos(Math.toRadians(lat))
+                for (index in 0 until elements.length()) {
+                    val item = elements.optJSONObject(index) ?: continue
+                    val tags = item.optJSONObject("tags") ?: continue
+                    val highway = tags.optString("highway").lowercase(Locale.UK)
+                    val hgvRaw = tags.optString("maxspeed:hgv").ifBlank {
+                        tags.optString("maxspeed:forward").ifBlank { tags.optString("maxspeed") }
+                    }.trim().lowercase(Locale.UK)
+                    val numeric = Regex("\\d+(?:\\.\\d+)?").find(hgvRaw)?.value?.toDoubleOrNull()
+                    val explicit = when {
+                        "nsl_single" in hgvRaw -> 40.0
+                        "nsl_dual" in hgvRaw -> 50.0
+                        "motorway" in hgvRaw -> 60.0
+                        numeric != null && ("km/h" in hgvRaw || "kph" in hgvRaw) -> numeric * 0.621371
+                        numeric != null -> numeric
+                        else -> null
+                    }
+                    val dual = tags.optString("dual_carriageway").equals("yes", true) ||
+                        tags.optString("divided").equals("yes", true) ||
+                        tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2
+                    val ukHgvDefault = when (highway) {
+                        "motorway" -> 60.0
+                        "motorway_link" -> 40.0
+                        "living_street" -> 20.0
+                        "residential", "unclassified" -> 30.0
+                        "trunk", "primary", "secondary", "tertiary" -> if (dual) 50.0 else 40.0
+                        else -> null
+                    }
+                    val mph = explicit ?: ukHgvDefault ?: continue
+                    val geometry = item.optJSONArray("geometry") ?: continue
+                    var wayDistance = Double.MAX_VALUE
+                    var previousX: Double? = null
+                    var previousY: Double? = null
+                    for (pointIndex in 0 until geometry.length()) {
+                        val point = geometry.optJSONObject(pointIndex) ?: continue
+                        val pointLat = point.optDouble("lat", Double.NaN)
+                        val pointLon = point.optDouble("lon", Double.NaN)
+                        if (!pointLat.isFinite() || !pointLon.isFinite()) continue
+                        val x = Math.toRadians(pointLon - lon) * earthRadius * cosLatitude
+                        val y = Math.toRadians(pointLat - lat) * earthRadius
+                        val ax = previousX; val ay = previousY
+                        if (ax != null && ay != null) {
+                            val dx = x - ax; val dy = y - ay
+                            val lengthSquared = dx * dx + dy * dy
+                            val t = if (lengthSquared > 0.0) ((-(ax * dx + ay * dy) / lengthSquared).coerceIn(0.0, 1.0)) else 0.0
+                            wayDistance = minOf(wayDistance, kotlin.math.hypot(ax + t * dx, ay + t * dy))
+                        } else wayDistance = minOf(wayDistance, kotlin.math.hypot(x, y))
+                        previousX = x; previousY = y
+                    }
+                    if (wayDistance < nearestDistance) {
+                        nearestDistance = wayDistance
+                        nearestValue = mph.toInt()
+                    }
+                }
+                if (nearestDistance <= 140.0) nearestValue else null
+            }.onFailure { android.util.Log.w("HAULWAY_SPEED", "Could not resolve current HGV speed limit", it) }.getOrNull()
         }
     }
 
@@ -1905,7 +1906,7 @@ private fun MapQuickActionCard(icon: ImageVector, title: String, subtitle: Strin
         shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C),
         border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))
     ) {
-        Row(Modifier.padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(color = Color(0xFF087CCB), shape = RoundedCornerShape(4.dp), modifier = Modifier.size(32.dp)) {
                 Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = White, modifier = Modifier.size(19.dp)) }
             }
@@ -1976,12 +1977,12 @@ private fun LaneGuidanceCard(instruction: String, roadName: String, distance: St
                 Text("LANE & EXIT GUIDANCE", color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
                 Text(distance, color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
-            Text(title, color = White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+            Text(title, color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("LEFT", "AHEAD", "RIGHT").forEachIndexed { index, label ->
                     val active = index == selectedLane
                     Surface(
-                        Modifier.weight(1f).height(54.dp),
+                        Modifier.weight(1f).height(66.dp),
                         shape = RoundedCornerShape(5.dp),
                         color = if (active) Color(0xFF075C91) else Color(0xFF202C35),
                         border = androidx.compose.foundation.BorderStroke(if (active) 2.dp else 1.dp, if (active) Color(0xFF55C5FF) else Color(0xFF465967))
@@ -2002,16 +2003,16 @@ private fun LaneGuidanceCard(instruction: String, roadName: String, distance: St
                 else if (isLeft) "Position for the left turn"
                 else if (isRight) "Position for the right turn"
                 else "Lane-level data not supplied for this junction",
-                color = Color(0xFFB8C7D1), fontSize = 8.sp, maxLines = 2
+                color = Color(0xFFB8C7D1), fontSize = 11.sp, maxLines = 2
             )
-            if (roadName.isNotBlank()) Text(roadName, color = Color(0xFF8BD5FF), fontSize = 8.sp, maxLines = 1)
+            if (roadName.isNotBlank()) Text(roadName, color = Color(0xFF8BD5FF), fontSize = 11.sp, maxLines = 1)
         }
     }
 }
 
 @Composable
 private fun NavigationStepCard(icon: ImageVector, distance: String, destination: String, accent: Color, isParking: Boolean = false) {
-    Surface(Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))) {
+    Surface(Modifier.fillMaxWidth().height(64.dp), shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))) {
         Row(Modifier.padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             if (isParking) {
                 Surface(color = Color(0xFF087CCB), shape = RoundedCornerShape(3.dp), modifier = Modifier.size(26.dp)) {
@@ -2050,19 +2051,36 @@ private fun updateHaulwayNativeMapOverlays(
             val source = style.getSourceAs<GeoJsonSource>("haulway-road-signs-source")
             if (source != null) source.setGeoJson(featureCollection) else {
                 style.addSource(GeoJsonSource("haulway-road-signs-source", featureCollection))
-                style.addLayer(CircleLayer("haulway-road-signs-circles", "haulway-road-signs-source").withProperties(
-                    PropertyFactory.circleRadius(13f),
-                    PropertyFactory.circleColor("#F8F8F8"),
+                style.addLayer(CircleLayer("haulway-road-signs-circles", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.eq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                    PropertyFactory.circleRadius(20f),
+                    PropertyFactory.circleColor("#FFFFFF"),
                     PropertyFactory.circleStrokeColor("#D71920"),
-                    PropertyFactory.circleStrokeWidth(3f),
-                    PropertyFactory.circleOpacity(0.98f)
+                    PropertyFactory.circleStrokeWidth(4f),
+                    PropertyFactory.circleOpacity(1f)
                 ))
-                style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withProperties(
+                style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.eq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.textField("{label}"),
-                    PropertyFactory.textSize(11f),
+                    PropertyFactory.textSize(17f),
                     PropertyFactory.textColor("#111111"),
                     PropertyFactory.textHaloColor("#FFFFFF"),
-                    PropertyFactory.textHaloWidth(0.7f),
+                    PropertyFactory.textHaloWidth(0.5f),
+                    PropertyFactory.textAllowOverlap(true),
+                    PropertyFactory.textIgnorePlacement(true),
+                    PropertyFactory.textFont(arrayOf("Open Sans Bold", "Arial Unicode MS Bold"))
+                ))
+                style.addLayer(CircleLayer("haulway-road-signs-other-circles", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.neq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                    PropertyFactory.circleRadius(16f),
+                    PropertyFactory.circleColor("#123D58"),
+                    PropertyFactory.circleStrokeColor("#8BD5FF"),
+                    PropertyFactory.circleStrokeWidth(3f),
+                    PropertyFactory.circleOpacity(1f)
+                ))
+                style.addLayer(SymbolLayer("haulway-road-signs-other-labels", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.neq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                    PropertyFactory.textField("{label}"),
+                    PropertyFactory.textSize(13f),
+                    PropertyFactory.textColor("#FFFFFF"),
+                    PropertyFactory.textHaloColor("#10202B"),
+                    PropertyFactory.textHaloWidth(1.2f),
                     PropertyFactory.textAllowOverlap(true),
                     PropertyFactory.textIgnorePlacement(true)
                 ))
@@ -2296,7 +2314,7 @@ private fun HaulwayNativeMapCanvas(
                         }
                     }
                 }
-                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(13)
+                val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
                     "node(around:250,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:250,$centerLat,$centerLon)[maxspeed];node(around:250,$centerLat,$centerLon)[maxspeed:hgv];way(around:250,$centerLat,$centerLon)[highway][maxspeed];way(around:250,$centerLat,$centerLon)[highway][maxspeed:hgv];"
                 }
@@ -2364,7 +2382,7 @@ private fun HaulwayNativeMapCanvas(
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
                     val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
-                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind)))
+                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind).put("kind", kind)))
                 }
                 JSONObject().put("type", "FeatureCollection").put("features", features).toString()
             }.onFailure { android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign data unavailable", it) }.getOrNull()
