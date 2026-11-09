@@ -2051,14 +2051,14 @@ private fun updateHaulwayNativeMapOverlays(
             val source = style.getSourceAs<GeoJsonSource>("haulway-road-signs-source")
             if (source != null) source.setGeoJson(featureCollection) else {
                 style.addSource(GeoJsonSource("haulway-road-signs-source", featureCollection))
-                style.addLayer(CircleLayer("haulway-road-signs-circles", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.eq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                style.addLayer(CircleLayer("haulway-road-signs-circles", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.eq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.circleRadius(20f),
                     PropertyFactory.circleColor("#FFFFFF"),
                     PropertyFactory.circleStrokeColor("#D71920"),
                     PropertyFactory.circleStrokeWidth(4f),
                     PropertyFactory.circleOpacity(1f)
                 ))
-                style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.eq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.eq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.textField("{label}"),
                     PropertyFactory.textSize(17f),
                     PropertyFactory.textColor("#111111"),
@@ -2068,14 +2068,14 @@ private fun updateHaulwayNativeMapOverlays(
                     PropertyFactory.textIgnorePlacement(true),
                     PropertyFactory.textFont(arrayOf("Open Sans Bold", "Arial Unicode MS Bold"))
                 ))
-                style.addLayer(CircleLayer("haulway-road-signs-other-circles", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.neq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                style.addLayer(CircleLayer("haulway-road-signs-other-circles", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.neq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.circleRadius(16f),
                     PropertyFactory.circleColor("#123D58"),
                     PropertyFactory.circleStrokeColor("#8BD5FF"),
                     PropertyFactory.circleStrokeWidth(3f),
                     PropertyFactory.circleOpacity(1f)
                 ))
-                style.addLayer(SymbolLayer("haulway-road-signs-other-labels", "haulway-road-signs-source").withFilter(com.mapbox.mapboxsdk.style.expressions.Expression.neq(com.mapbox.mapboxsdk.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
+                style.addLayer(SymbolLayer("haulway-road-signs-other-labels", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.neq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.textField("{label}"),
                     PropertyFactory.textSize(13f),
                     PropertyFactory.textColor("#FFFFFF"),
