@@ -647,7 +647,7 @@ private fun maneuverIconFor(instruction: String): ImageVector {
 private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     val appContext: Context = LocalContext.current
     val mapSearchScope = rememberCoroutineScope()
-    var zoom by remember { mutableIntStateOf(-1) }
+    var zoom by remember { mutableIntStateOf(-3) }
     var showMapSearch by remember { mutableStateOf(false) }
     var mapSearchText by remember { mutableStateOf("") }
     var mapSearchResults by remember { mutableStateOf<List<MapSearchResult>>(emptyList()) }
@@ -1040,6 +1040,65 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     Column(Modifier.fillMaxSize().background(Color(0xFF080E13)).padding(5.dp)) {
         DeviceStatusHeader(modifier = Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 6.dp))
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Compact right-hand information rail: upcoming turns, parking and services.
+            Column(
+                Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF0B1117)).padding(5.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (RoutePlanStore.maneuvers.isNotEmpty()) {
+                    RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(4).forEachIndexed { index, maneuver ->
+                        val distanceLabel = if (index == 0) distanceToManeuver?.let(::formatNavigationDistance) ?: "—" else "UP NEXT"
+                        NavigationStepCard(
+                            maneuverIconFor(maneuver.label), distanceLabel,
+                            maneuver.label + if (maneuver.roadName.isNotBlank()) " · " + maneuver.roadName else "",
+                            if (index == 0) blue else Color(0xFF526575)
+                        )
+                    }
+                } else {
+                    NavigationStepCard(Icons.Default.Navigation, "—", "Waiting for route", blue)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        MapQuickActionCard(icon = Icons.Default.LocalParking, title = "Truck parking", subtitle = "Nearby", onClick = { onNavigate("TRUCK PARKING") })
+                    }
+                    Box(Modifier.weight(1f)) {
+                        MapQuickActionCard(icon = Icons.Default.LocalGasStation, title = "Services", subtitle = "Fuel & facilities", onClick = { onNavigate("SERVICES & POI") })
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let {
+                    val distanceLabel = remainingDistanceMetres?.let(::formatNavigationDistance)
+                        ?: RoutePlanStore.summary?.substringBefore(" · ") ?: "—"
+                    val secondsLeft = remainingDurationSeconds
+                    val etaLabel = if (secondsLeft != null) {
+                        val mins = (secondsLeft / 60.0).toInt().coerceAtLeast(0)
+                        "${mins / 60} h ${mins % 60} min"
+                    } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
+                    val arrivalLabel = remainingDurationSeconds?.let {
+                        SimpleDateFormat("HH:mm", Locale.UK).format(Date(System.currentTimeMillis() + (it * 1000.0).toLong()))
+                    } ?: "—"
+                    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(distanceLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Spacer(Modifier.width(5.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                            Spacer(Modifier.width(4.dp))
+                            Column(Modifier.weight(0.75f)) {
+                                Text("ARRIVAL", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Text(arrivalLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
                 RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
@@ -1074,15 +1133,50 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         else -> "FOLLOW ROUTE MARKINGS"
                     }
                     Surface(
-                        Modifier.align(Alignment.TopCenter).padding(top = 10.dp, start = 58.dp, end = 58.dp),
-                        shape = RoundedCornerShape(9.dp), color = Color(0xE9161D23),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
+                        Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 10.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xB80A171D),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xAA168FE8)),
+                        shadowElevation = 8.dp
                     ) {
-                        Column(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(if (exitNumber != null && "roundabout" in instruction) "ROUNDABOUT · EXIT $exitNumber" else maneuver.label.uppercase(Locale.UK),
-                                color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                            Text(laneHint + "  ·  " + (distanceToManeuver?.let(::formatNavigationDistance) ?: "—"),
-                                color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
+                                    Icon(maneuverIconFor(maneuver.label), null, tint = White, modifier = Modifier.size(43.dp))
+                                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                        Text(distanceToManeuver?.let(::formatNavigationDistance) ?: "—",
+                                            color = White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                        Text(if (exitNumber != null && "roundabout" in instruction) "ROUNDABOUT · EXIT $exitNumber" else maneuver.label.uppercase(Locale.UK),
+                                            color = Color(0xFFBDE8FF), fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    }
+                                }
+                                if (exitNumber != null) {
+                                    Surface(shape = RoundedCornerShape(9.dp), color = Color(0xFF087FE5)) {
+                                        Text("EXIT $exitNumber", color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                                    }
+                                } else if (Regex("\\b(M|A|B)\\d{1,4}\\b", RegexOption.IGNORE_CASE).containsMatchIn(maneuver.roadName)) {
+                                    val routeShield = Regex("\\b(M|A|B)\\d{1,4}\\b", RegexOption.IGNORE_CASE).find(maneuver.roadName)?.value?.uppercase(Locale.UK) ?: ""
+                                    Surface(shape = RoundedCornerShape(7.dp), color = Color(0xFF0756A5), border = androidx.compose.foundation.BorderStroke(2.dp, Color.White)) {
+                                        Text(routeShield, color = White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                                    }
+                                }
+                            }
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                if (liveSpeedLimitMph != null) {
+                                    Surface(shape = CircleShape, color = Color.White, border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD71920)), modifier = Modifier.size(47.dp)) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(liveSpeedLimitMph.toString(), color = Color(0xFF111111), fontSize = 18.sp, fontWeight = FontWeight.Black)
+                                        }
+                                    }
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                    Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                }
+                                Icon(Icons.Default.Signpost, null, tint = Color(0xFFFFD166), modifier = Modifier.size(27.dp))
+                            }
                         }
                     }
                 }
@@ -1220,71 +1314,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                 // The live vehicle marker is drawn by the map only after a real GPS fix.
             }
 
-            // Compact right-hand information rail: upcoming turns, parking and services.
-            Column(
-                Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFF0B1117)).padding(5.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                RoutePlanStore.maneuvers.getOrNull(activeManeuverIndex)?.let { current ->
-                    LaneGuidanceCard(
-                        instruction = current.label,
-                        roadName = current.roadName,
-                        distance = distanceToManeuver?.let(::formatNavigationDistance) ?: "—"
-                    )
-                }
-                if (RoutePlanStore.maneuvers.isNotEmpty()) {
-                    RoutePlanStore.maneuvers.drop(activeManeuverIndex).take(4).forEachIndexed { index, maneuver ->
-                        val distanceLabel = if (index == 0) distanceToManeuver?.let(::formatNavigationDistance) ?: "—" else "UP NEXT"
-                        NavigationStepCard(
-                            maneuverIconFor(maneuver.label), distanceLabel,
-                            maneuver.label + if (maneuver.roadName.isNotBlank()) " · " + maneuver.roadName else "",
-                            if (index == 0) blue else Color(0xFF526575)
-                        )
-                    }
-                } else {
-                    NavigationStepCard(Icons.Default.Navigation, "—", "Waiting for route", blue)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Box(Modifier.weight(1f)) {
-                        MapQuickActionCard(icon = Icons.Default.LocalParking, title = "Truck parking", subtitle = "Nearby", onClick = { onNavigate("TRUCK PARKING") })
-                    }
-                    Box(Modifier.weight(1f)) {
-                        MapQuickActionCard(icon = Icons.Default.LocalGasStation, title = "Services", subtitle = "Fuel & facilities", onClick = { onNavigate("SERVICES & POI") })
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                RoutePlanStore.summary?.takeIf { RoutePlanStore.coordinatesJson != null }?.let {
-                    val distanceLabel = remainingDistanceMetres?.let(::formatNavigationDistance)
-                        ?: RoutePlanStore.summary?.substringBefore(" · ") ?: "—"
-                    val secondsLeft = remainingDurationSeconds
-                    val etaLabel = if (secondsLeft != null) {
-                        val mins = (secondsLeft / 60.0).toInt().coerceAtLeast(0)
-                        "${mins / 60} h ${mins % 60} min"
-                    } else RoutePlanStore.summary?.substringAfter(" · ", "—") ?: "—"
-                    val arrivalLabel = remainingDurationSeconds?.let {
-                        SimpleDateFormat("HH:mm", Locale.UK).format(Date(System.currentTimeMillis() + (it * 1000.0).toLong()))
-                    } ?: "—"
-                    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(distanceLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                            Spacer(Modifier.width(5.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                            Spacer(Modifier.width(4.dp))
-                            Column(Modifier.weight(0.75f)) {
-                                Text("ARRIVAL", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(arrivalLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                            }
-                        }
-                    }
-                }
-            }
+
         }
 
         // Keep a visible gap between the map/info workspace and bottom navigation tiles.
@@ -1949,70 +1979,10 @@ private fun pointAheadOnRoute(latitude: Double, longitude: Double, routeJson: St
     } catch (_: Exception) { null }
 }
 
-@Composable
-private fun LaneGuidanceCard(instruction: String, roadName: String, distance: String) {
-    val text = instruction.lowercase(Locale.UK)
-    val exit = Regex("(?:exit|take)\\s+(?:the\\s+)?(\\d+)(?:st|nd|rd|th)?\\s+exit").find(text)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    val isRoundabout = "roundabout" in text
-    val isLeft = "left" in text || (isRoundabout && exit == 1)
-    val isRight = "right" in text || (isRoundabout && exit != null && exit >= 3)
-    val selectedLane = when { isLeft -> 0; isRight -> 2; else -> 1 }
-    val title = when {
-        isRoundabout && exit != null -> "ROUNDABOUT · EXIT $exit"
-        isRoundabout -> "ROUNDABOUT · FOLLOW SIGNS"
-        isLeft -> "KEEP LEFT"
-        isRight -> "KEEP RIGHT"
-        else -> "FOLLOW ROUTE AHEAD"
-    }
-    Surface(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = Color(0xE91B2A35),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))
-    ) {
-        Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Navigation, null, tint = Color(0xFF8BD5FF), modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("LANE & EXIT GUIDANCE", color = Color(0xFF8BD5FF), fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
-                Text(distance, color = White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(title, color = White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf("LEFT", "AHEAD", "RIGHT").forEachIndexed { index, label ->
-                    val active = index == selectedLane
-                    Surface(
-                        Modifier.weight(1f).height(66.dp),
-                        shape = RoundedCornerShape(5.dp),
-                        color = if (active) Color(0xFF075C91) else Color(0xFF202C35),
-                        border = androidx.compose.foundation.BorderStroke(if (active) 2.dp else 1.dp, if (active) Color(0xFF55C5FF) else Color(0xFF465967))
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            Icon(when (index) {
-                                0 -> Icons.Default.TurnLeft
-                                2 -> Icons.Default.TurnRight
-                                else -> Icons.Default.ArrowUpward
-                            }, null, tint = if (active) Color.White else Color(0xFF8195A3), modifier = Modifier.size(23.dp))
-                            Text(label, color = if (active) White else Color(0xFF9EADB7), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-            Text(
-                if (isRoundabout && exit != null) "Take exit $exit · confirm with roadside lane arrows"
-                else if (isLeft) "Position for the left turn"
-                else if (isRight) "Position for the right turn"
-                else "Lane-level data not supplied for this junction",
-                color = Color(0xFFB8C7D1), fontSize = 11.sp, maxLines = 2
-            )
-            if (roadName.isNotBlank()) Text(roadName, color = Color(0xFF8BD5FF), fontSize = 11.sp, maxLines = 1)
-        }
-    }
-}
 
 @Composable
 private fun NavigationStepCard(icon: ImageVector, distance: String, destination: String, accent: Color, isParking: Boolean = false) {
-    Surface(Modifier.fillMaxWidth().height(64.dp), shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))) {
+    Surface(Modifier.fillMaxWidth().height(78.dp), shape = RoundedCornerShape(6.dp), color = Color(0xE91B242C), border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0x554F606D))) {
         Row(Modifier.padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             if (isParking) {
                 Surface(color = Color(0xFF087CCB), shape = RoundedCornerShape(3.dp), modifier = Modifier.size(26.dp)) {
@@ -2021,8 +1991,8 @@ private fun NavigationStepCard(icon: ImageVector, distance: String, destination:
             } else Icon(icon, null, tint = White, modifier = Modifier.size(23.dp))
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(distance, color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text(destination, color = Color(0xFFD0D7DD), fontSize = 10.sp, maxLines = 1)
+                Text(distance, color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(destination, color = Color(0xFFD0D7DD), fontSize = 13.sp, maxLines = 1)
             }
         }
     }
