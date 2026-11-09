@@ -1135,21 +1135,21 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         else -> "FOLLOW ROUTE MARKINGS"
                     }
                     Surface(
-                        Modifier.align(Alignment.TopCenter).fillMaxWidth(0.8f).padding(top = 8.dp),
+                        Modifier.align(Alignment.TopCenter).fillMaxWidth(0.66f).padding(top = 5.dp),
                         shape = RoundedCornerShape(14.dp),
                         color = Color(0xB80A171D),
                         border = androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xAA168FE8)),
                         shadowElevation = 8.dp
                     ) {
-                        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
-                                    Icon(maneuverIconFor(maneuver.label), null, tint = White, modifier = Modifier.size(34.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                                    Icon(maneuverIconFor(maneuver.label), null, tint = White, modifier = Modifier.size(28.dp))
                                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                                         Text(distanceToManeuver?.let(::formatNavigationDistance) ?: "—",
-                                            color = White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                            color = White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                                         Text(if (exitNumber != null && "roundabout" in instruction) "ROUNDABOUT · EXIT $exitNumber" else maneuver.label.uppercase(Locale.UK),
-                                            color = Color(0xFFBDE8FF), fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            color = Color(0xFFBDE8FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                                     }
                                 }
                                 if (exitNumber != null) {
@@ -1177,7 +1177,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     maneuverText.contains("right") || maneuverText.contains("3rd exit") || maneuverText.contains("third exit") -> 2
                                     else -> 1
                                 }
-                                Row(Modifier.fillMaxWidth().height(42.dp).background(Color(0x66202F3A), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Row(Modifier.fillMaxWidth().height(30.dp).background(Color(0x66202F3A), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                                     for (lane in 0..2) {
                                         val activeLane = lane == turnSide
                                         Surface(Modifier.weight(1f).fillMaxHeight(), color = if (activeLane) Color(0xFF087FE5) else Color(0x332C4352), shape = RoundedCornerShape(5.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (activeLane) Color(0xFF8BD5FF) else Color(0x557D91A0))) {
@@ -1186,7 +1186,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                                     when (lane) { 0 -> Icons.Default.TurnLeft; 1 -> Icons.Default.ArrowUpward; else -> Icons.Default.TurnRight },
                                                     contentDescription = if (activeLane) "Suggested lane" else "Lane",
                                                     tint = if (activeLane) Color.White else Color(0xFF9BAAB5),
-                                                    modifier = Modifier.size(27.dp)
+                                                    modifier = Modifier.size(21.dp)
                                                 )
                                             }
                                         }
@@ -1197,15 +1197,15 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                 if (liveSpeedLimitMph != null) {
                                     Surface(shape = CircleShape, color = Color.White, border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD71920)), modifier = Modifier.size(42.dp)) {
                                         Box(contentAlignment = Alignment.Center) {
-                                            Text(liveSpeedLimitMph.toString(), color = Color(0xFF111111), fontSize = 16.sp, fontWeight = FontWeight.Black)
+                                            Text(liveSpeedLimitMph.toString(), color = Color(0xFF111111), fontSize = 13.sp, fontWeight = FontWeight.Black)
                                         }
                                     }
                                 }
                                 Column(Modifier.weight(1f)) {
-                                    Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
-                                    Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
+                                    Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 }
-                                Icon(Icons.Default.Navigation, null, tint = Color(0xFFFFD166), modifier = Modifier.size(27.dp))
+                                Icon(Icons.Default.Navigation, null, tint = Color(0xFFFFD166), modifier = Modifier.size(20.dp))
                             }
                         }
                     }
@@ -2339,7 +2339,7 @@ private fun HaulwayNativeMapCanvas(
                 }
                 val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];);"
+                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];node(around:180,$centerLat,$centerLon)[traffic_sign~"maxspeed"];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][traffic_sign~"maxspeed"];);"
                 }
                 val query = "[out:json][timeout:25];($clauses);out center tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
@@ -2385,7 +2385,7 @@ private fun HaulwayNativeMapCanvas(
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
                     val highwayTag = tags.optString("highway")
-                    val rawSpeed = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed") }
+                    val rawSpeed = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed").ifBlank { Regex("\\d+(?:\\.\\d+)?").find(tags.optString("traffic_sign"))?.value.orEmpty() } }
                     val speedNumber = Regex("\\d+(?:\\.\\d+)?").find(rawSpeed)?.value?.toDoubleOrNull()
                     val kind: String
                     val label: String
