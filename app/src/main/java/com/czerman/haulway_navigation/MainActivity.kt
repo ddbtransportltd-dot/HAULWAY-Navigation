@@ -2241,6 +2241,10 @@ private fun HaulwayNativeMapCanvas(
     var cachedStyleJson by remember { mutableStateOf(styleCachePrefs.getString("openfreemap_style_$selectedNativeMapStyle", null)) }
     var roadSignsJson by remember { mutableStateOf<String?>(null) }
     var lastRoadSignsFetchAt by remember { mutableLongStateOf(0L) }
+    var searchLocationFocusPending by remember { mutableStateOf(false) }
+    LaunchedEffect(searchLocation) {
+        if (searchLocation != null) searchLocationFocusPending = true
+    }
     var lastRoadSignsRouteKey by remember { mutableStateOf("") }
     val latestOnUserGesture by rememberUpdatedState(onUserGesture)
     val latestGpsLatitude by rememberUpdatedState(latitude)
@@ -2307,6 +2311,7 @@ private fun HaulwayNativeMapCanvas(
                     // A manual drag/zoom/rotate explicitly switches the map into FREE MOVEMENT.
                     // Clear the one-shot startup recenter too, otherwise the next state update snaps back to GPS.
                     forceGpsRecenter = false
+                    searchLocationFocusPending = false
                     latestOnUserGesture()
                 }
             }
@@ -2355,13 +2360,24 @@ private fun HaulwayNativeMapCanvas(
                 var responseText: String? = null
                 for (endpointBase in endpoints) {
                     try {
-                        val endpoint = URL(endpointBase + "?data=" + URLEncoder.encode(query, "UTF-8"))
-                        val connection = endpoint.openConnection() as java.net.HttpURLConnection
-                        connection.connectTimeout = 6000
-                        connection.readTimeout = 19000
-                        try { responseText = connection.inputStream.bufferedReader().use { it.readText() } }
-                        finally { connection.disconnect() }
-                        if (responseText != null) break
+                        val connection = (URL(endpointBase).openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            doOutput = true
+                            connectTimeout = 8000
+                            readTimeout = 25000
+                            setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+                            setRequestProperty("User-Agent", "HAULWAY-Navigation/2.2")
+                        }
+                        try {
+                            val body = "data=" + URLEncoder.encode(query, "UTF-8")
+                            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                            val status = connection.responseCode
+                            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                            val bodyText = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                            if (status in 200..299 && bodyText.isNotBlank()) responseText = bodyText
+                            else android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign endpoint returned HTTP $status")
+                        } finally { connection.disconnect() }
+                        if (!responseText.isNullOrBlank()) break
                     } catch (error: Exception) {
                         android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign endpoint failed: $endpointBase", error)
                     }
@@ -2563,11 +2579,12 @@ private fun HaulwayNativeMapCanvas(
         } else {
             val hasGps = latitude != null && longitude != null
             val currentCamera = map.cameraPosition
-            val shouldFollowGps = searchLocation == null && hasGps && (followEnabled || forceGpsRecenter)
-            val target = searchLocation?.let { LatLng(it.first, it.second) } ?: if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
-            // A globe-to-GPS transition should land at a useful street-level zoom,
-            // even when the user has not touched the manual zoom controls.
-            val baseZoom = if (searchLocation != null) 16.5 else if (shouldFollowGps) (16.0 + zoom.toDouble()) else currentCamera.zoom
+            val focusSearchResult = searchLocation != null && searchLocationFocusPending
+            val shouldFollowGps = !focusSearchResult && hasGps && (followEnabled || forceGpsRecenter)
+            val target = if (focusSearchResult) LatLng(searchLocation!!.first, searchLocation.second) else if (shouldFollowGps) LatLng(latitude!!, longitude!!) else currentCamera.target ?: LatLng(53.4808, -2.2426)
+            // A search result is centred once. After that, manual map movement remains free
+            // even while GPS coordinates continue updating in the background.
+            val baseZoom = if (focusSearchResult) 16.5 else if (shouldFollowGps) (16.0 + zoom.toDouble()) else currentCamera.zoom
             val maneuverZoom = when {
                 distanceToManeuver == null -> 0.0
                 distanceToManeuver < 120.0 -> 2.0
@@ -2594,6 +2611,9 @@ private fun HaulwayNativeMapCanvas(
         }
         // Keep the globe-to-live-position camera flight comfortably below five seconds.
         map.animateCamera(CameraUpdateFactory.newCameraPosition(camera), 1_400)
+        if (!globeMode && searchLocation != null && searchLocationFocusPending) {
+            searchLocationFocusPending = false
+        }
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF101B24))) {
