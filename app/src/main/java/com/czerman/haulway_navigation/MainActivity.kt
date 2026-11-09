@@ -663,7 +663,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     var avoidRoadText by remember { mutableStateOf("") }
     var avoidActionBusy by remember { mutableStateOf(false) }
     var headingUp by remember { mutableStateOf(true) }
-    var followEnabled by remember { mutableStateOf(true) }
+    var followEnabled by remember { mutableStateOf(false) }
     var tilt3D by remember { mutableStateOf(true) }
     var remainingDistanceMetres by remember { mutableStateOf<Double?>(null) }
     var remainingDurationSeconds by remember { mutableStateOf<Double?>(null) }
@@ -1103,7 +1103,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
 
             // Map canvas and overlays occupy most of the display.
             Box(Modifier.weight(0.65f).fillMaxHeight().clip(RoundedCornerShape(12.dp))) {
-                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation)
+                RealNavigationMap(zoom, liveLatitude, liveLongitude, liveBearing, liveAccuracy, mapFollowRequest, mapStyleRequest, headingUp, followEnabled, tilt3D, selectedMapSearchLocation) { followEnabled = false }
 
                 // Address search is directly accessible from the map, without leaving navigation.
                 Surface(
@@ -2301,7 +2301,12 @@ private fun HaulwayNativeMapCanvas(
             map.uiSettings.isRotateGesturesEnabled = true
             map.uiSettings.isCompassEnabled = false
             map.addOnCameraMoveStartedListener { reason ->
-                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) latestOnUserGesture()
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                    // A manual drag/zoom/rotate explicitly switches the map into FREE MOVEMENT.
+                    // Clear the one-shot startup recenter too, otherwise the next state update snaps back to GPS.
+                    forceGpsRecenter = false
+                    latestOnUserGesture()
+                }
             }
             map.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(53.4808, -2.2426))
@@ -2604,7 +2609,8 @@ private fun RealNavigationMap(
     headingUp: Boolean,
     followEnabled: Boolean,
     tilt3D: Boolean,
-    searchLocation: Pair<Double, Double>?
+    searchLocation: Pair<Double, Double>?,
+    onUserGesture: () -> Unit = {}
 ) {
     HaulwayNativeMapCanvas(
         routeJson = RoutePlanStore.coordinatesJson,
@@ -2617,7 +2623,8 @@ private fun RealNavigationMap(
         followEnabled = followEnabled,
         tilt3D = tilt3D,
         searchLocation = searchLocation,
-        showGlobeControl = false
+        showGlobeControl = false,
+        onUserGesture = onUserGesture
     )
 }
 
