@@ -356,8 +356,10 @@ private suspend fun calculateRoadRoute(
             // ORS avoid_polygons uses GeoJSON MultiPolygon coordinates in [lon, lat] order.
             val polygons = org.json.JSONArray()
             avoidPoints.forEach { (lat, lon) ->
-                val dLat = 0.0022
-                val dLon = 0.0028 / kotlin.math.cos(Math.toRadians(lat)).coerceAtLeast(0.2)
+                // Keep the avoid area local to one short road segment. The former
+                // ~500 x 600 m box could block adjacent junction links and disconnect HGV routing.
+                val dLat = 0.00045
+                val dLon = 0.00055 / kotlin.math.cos(Math.toRadians(lat)).coerceAtLeast(0.2)
                 val ring = org.json.JSONArray()
                     .put(org.json.JSONArray().put(lon - dLon).put(lat - dLat))
                     .put(org.json.JSONArray().put(lon + dLon).put(lat - dLat))
@@ -1471,28 +1473,42 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                             if (lat == null || lon == null || route.isNullOrBlank()) {
                                 Toast.makeText(appContext, "Start a route and wait for a GPS fix first.", Toast.LENGTH_LONG).show()
                             } else {
-                                val point = pointAheadOnRoute(lat, lon, route, 500.0)
-                                if (point == null) Toast.makeText(appContext, "Could not identify the road ahead on this route.", Toast.LENGTH_LONG).show()
+                                val candidateDistances = listOf(500.0, 900.0, 1400.0)
+                                val candidatePoints = candidateDistances.mapNotNull { pointAheadOnRoute(lat, lon, route, it) }
+                                if (candidatePoints.isEmpty()) Toast.makeText(appContext, "Could not identify the road ahead on this route.", Toast.LENGTH_LONG).show()
                                 else {
                                     avoidActionBusy = true
                                     mapSearchScope.launch {
                                         try {
-                                            val newAvoid = (RoutePlanStore.avoidPoints + point).distinct()
-                                            val updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, lon to lat, newAvoid)
-                                            RoutePlanStore.avoidPoints = newAvoid
-                                            RoutePlanStore.coordinatesJson = updated.coordinatesJson
-                                            RoutePlanStore.summary = "${updated.distanceText} · ${updated.durationText}"
-                                            RoutePlanStore.totalDistanceMetres = updated.totalDistanceMetres
-                                            RoutePlanStore.totalDurationSeconds = updated.totalDurationSeconds
-                                            remainingDistanceMetres = updated.totalDistanceMetres
-                                            remainingDurationSeconds = updated.totalDurationSeconds
-                                            RoutePlanStore.maneuvers = updated.maneuvers
-                                            RoutePlanStore.steps = updated.steps
+                                            var updated: RouteResult? = null
+                                            var lastError: Exception? = null
+                                            // Try progressively farther points ahead. A single blocked point can disconnect
+                                            // the HGV graph at a junction, so do not fail the whole reroute on the first 404.
+                                            for (point in candidatePoints) {
+                                                try {
+                                                    val newAvoid = (RoutePlanStore.avoidPoints + point).distinct()
+                                                    updated = calculateRoadRoute(listOf("CURRENT LOCATION", RoutePlanStore.destination), "FASTEST", appContext, lon to lat, newAvoid)
+                                                    RoutePlanStore.avoidPoints = newAvoid
+                                                    break
+                                                } catch (attemptError: Exception) {
+                                                    lastError = attemptError
+                                                    android.util.Log.w("HAULWAY_ROUTE", "Alternative route attempt failed; trying a farther point ahead", attemptError)
+                                                }
+                                            }
+                                            val result = updated ?: throw (lastError ?: IllegalStateException("No alternative HGV route could be found."))
+                                            RoutePlanStore.coordinatesJson = result.coordinatesJson
+                                            RoutePlanStore.summary = "${result.distanceText} · ${result.durationText}"
+                                            RoutePlanStore.totalDistanceMetres = result.totalDistanceMetres
+                                            RoutePlanStore.totalDurationSeconds = result.totalDurationSeconds
+                                            remainingDistanceMetres = result.totalDistanceMetres
+                                            remainingDurationSeconds = result.totalDurationSeconds
+                                            RoutePlanStore.maneuvers = result.maneuvers
+                                            RoutePlanStore.steps = result.steps
                                             activeManeuverIndex = 0
                                             lastSpokenStage = ""
-                                            Toast.makeText(appContext, "Road ahead avoided. New HGV route ready.", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(appContext, "Alternative HGV route ready.", Toast.LENGTH_LONG).show()
                                             showRouteAvoidDialog = false
-                                        } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not avoid road ahead.", Toast.LENGTH_LONG).show() }
+                                        } catch (e: Exception) { Toast.makeText(appContext, e.localizedMessage ?: "Could not calculate an alternative HGV route.", Toast.LENGTH_LONG).show() }
                                         finally { avoidActionBusy = false }
                                     }
                                 }
