@@ -768,12 +768,14 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     val tags = item.optJSONObject("tags") ?: continue
                     val highway = tags.optString("highway").lowercase(Locale.UK)
                     val hgvRaw = tags.optString("maxspeed:hgv").trim().lowercase(Locale.UK)
-                    val numeric = Regex("\\d+(?:\\.\\d+)?").find(hgvRaw)?.value?.toDoubleOrNull()
+                    val generalRaw = tags.optString("maxspeed").trim().lowercase(Locale.UK)
+                    val explicitRaw = hgvRaw.ifBlank { generalRaw }
+                    val numeric = Regex("\\d+(?:\\.\\d+)?").find(explicitRaw)?.value?.toDoubleOrNull()
                     val explicitHgv = when {
                         "nsl_single" in hgvRaw -> 40.0
                         "nsl_dual" in hgvRaw -> 50.0
                         "motorway" in hgvRaw -> 60.0
-                        numeric != null && ("km/h" in hgvRaw || "kph" in hgvRaw) -> numeric * 0.621371
+                        numeric != null && ("km/h" in explicitRaw || "kph" in explicitRaw) -> numeric * 0.621371
                         numeric != null -> numeric
                         else -> null
                     }
