@@ -1942,8 +1942,8 @@ private fun MapQuickActionCard(icon: ImageVector, title: String, subtitle: Strin
             }
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(subtitle, color = Color(0xFFD0D7DD), fontSize = 9.sp, maxLines = 2)
+                Text(title, color = White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, color = Color(0xFFD0D7DD), fontSize = 11.sp, maxLines = 2)
             }
         }
     }
@@ -2030,7 +2030,7 @@ private fun updateHaulwayNativeMapOverlays(
                 ))
                 style.addLayer(SymbolLayer("haulway-road-signs-labels", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.eq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.textField("{label}"),
-                    PropertyFactory.textSize(17f),
+                    PropertyFactory.textSize(19f),
                     PropertyFactory.textColor("#111111"),
                     PropertyFactory.textHaloColor("#FFFFFF"),
                     PropertyFactory.textHaloWidth(0.5f),
@@ -2039,7 +2039,7 @@ private fun updateHaulwayNativeMapOverlays(
                     PropertyFactory.textFont(arrayOf("Open Sans Bold", "Arial Unicode MS Bold"))
                 ))
                 style.addLayer(CircleLayer("haulway-road-signs-other-circles", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.neq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
-                    PropertyFactory.circleRadius(16f),
+                    PropertyFactory.circleRadius(19f),
                     PropertyFactory.circleColor("#123D58"),
                     PropertyFactory.circleStrokeColor("#8BD5FF"),
                     PropertyFactory.circleStrokeWidth(3f),
@@ -2047,7 +2047,7 @@ private fun updateHaulwayNativeMapOverlays(
                 ))
                 style.addLayer(SymbolLayer("haulway-road-signs-other-labels", "haulway-road-signs-source").withFilter(org.maplibre.android.style.expressions.Expression.neq(org.maplibre.android.style.expressions.Expression.get("kind"), "SPEED")).withProperties(
                     PropertyFactory.textField("{label}"),
-                    PropertyFactory.textSize(13f),
+                    PropertyFactory.textSize(16f),
                     PropertyFactory.textColor("#FFFFFF"),
                     PropertyFactory.textHaloColor("#10202B"),
                     PropertyFactory.textHaloWidth(1.2f),
