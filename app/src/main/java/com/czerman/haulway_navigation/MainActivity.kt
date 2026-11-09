@@ -4587,7 +4587,7 @@ private fun HaulwaySectionScreen(
     val blue = Color(0xFF087ED1)
     val items = when (section) {
         "HOME" -> listOf("NAVIGATION", "360 STREET VIEW", "ROUTE PLANNER", "TRUCK PROFILE", "TRUCK PARKING", "SERVICES & POI", "TRAFFIC", "MY PLACES", "HISTORY", "SETTINGS")
-        "360 STREET VIEW" -> listOf("Search coordinates", "Google Street View", "Mapillary imagery", "KartaView imagery")
+        "360 STREET VIEW" -> listOf("Search coordinates", "Mapillary imagery", "KartaView imagery")
         "ROUTE PLANNER" -> listOf("Start location", "Destination", "Add stop", "Route options", "Avoid toll roads", "Avoid low bridges", "Save route", "Start navigation")
         "TRUCK PROFILE" -> listOf("Vehicle type: Articulated", "Height: 4.00 m", "Width: 2.55 m", "Length: 16.50 m", "Gross weight: 44,000 kg", "Axle weight: 11,500 kg", "Load type: General", "Maximum speed: 56 mph", "Save vehicle profile")
         "TRUCK PARKING" -> listOf("Near me", "Along route", "At destination", "Truck Park M62", "Moto Hospitality", "Rotherham Truck Stop", "Doncaster Services")
