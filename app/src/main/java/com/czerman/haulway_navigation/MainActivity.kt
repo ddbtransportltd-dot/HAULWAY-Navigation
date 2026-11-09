@@ -1163,6 +1163,28 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     }
                                 }
                             }
+                            // Lane arrows are a visual turn recommendation derived from the active maneuver.
+                            // Exact lane-level data is not supplied by the current routing response.
+                            val turnSide = when {
+                                maneuver.label.contains("left", true) || maneuver.label.contains("uturn", true) -> 0
+                                maneuver.label.contains("right", true) -> 2
+                                else -> 1
+                            }
+                            Row(Modifier.fillMaxWidth().height(42.dp).background(Color(0x66202F3A), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                                for (lane in 0..2) {
+                                    val activeLane = lane == turnSide
+                                    Surface(Modifier.weight(1f).fillMaxHeight(), color = if (activeLane) Color(0xFF087FE5) else Color(0x332C4352), shape = RoundedCornerShape(5.dp), border = androidx.compose.foundation.BorderStroke(1.dp, if (activeLane) Color(0xFF8BD5FF) else Color(0x557D91A0))) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                when (lane) { 0 -> Icons.Default.TurnLeft; 1 -> Icons.Default.ArrowUpward; else -> Icons.Default.TurnRight },
+                                                contentDescription = if (activeLane) "Suggested lane" else "Lane",
+                                                tint = if (activeLane) Color.White else Color(0xFF9BAAB5),
+                                                modifier = Modifier.size(27.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                                 if (liveSpeedLimitMph != null) {
                                     Surface(shape = CircleShape, color = Color.White, border = androidx.compose.foundation.BorderStroke(4.dp, Color(0xFFD71920)), modifier = Modifier.size(42.dp)) {
@@ -2340,17 +2362,20 @@ private fun HaulwayNativeMapCanvas(
                 for (index in 0 until elements.length()) {
                     val item = elements.optJSONObject(index) ?: continue
                     val tags = item.optJSONObject("tags") ?: continue
-                    val kind = when {
-                        tags.optString("highway") == "stop" -> "STOP"
-                        tags.optString("highway") == "give_way" -> "GIVE WAY"
-                        tags.optString("highway") == "traffic_signals" -> "●"
-                        tags.optString("highway") == "speed_camera" -> "CAM"
-                        tags.has("maxspeed:hgv") || tags.has("maxspeed") -> {
-                            val raw = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed") }
-                            val number = Regex("\\d+(?:\\.\\d+)?").find(raw)?.value ?: continue
-                            val numeric = number.toDoubleOrNull() ?: continue
-                            val mph = if (raw.contains("km/h", true) || raw.contains("kph", true)) (numeric * 0.621371).toInt() else numeric.toInt()
-                            mph.toString()
+                    val highwayTag = tags.optString("highway")
+                    val rawSpeed = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed") }
+                    val speedNumber = Regex("\\d+(?:\\.\\d+)?").find(rawSpeed)?.value?.toDoubleOrNull()
+                    val kind: String
+                    val label: String
+                    when {
+                        highwayTag == "stop" -> { kind = "STOP"; label = "STOP" }
+                        highwayTag == "give_way" -> { kind = "GIVE WAY"; label = "GIVE WAY" }
+                        highwayTag == "traffic_signals" -> { kind = "SIGNAL"; label = "●" }
+                        highwayTag == "speed_camera" -> { kind = "CAMERA"; label = "CAM" }
+                        speedNumber != null -> {
+                            val mph = if (rawSpeed.contains("km/h", true) || rawSpeed.contains("kph", true)) (speedNumber * 0.621371).toInt() else speedNumber.toInt()
+                            kind = "SPEED"
+                            label = mph.toString()
                         }
                         else -> continue
                     }
@@ -2361,7 +2386,7 @@ private fun HaulwayNativeMapCanvas(
                     val key = "$kind:${latValue.toString().take(9)}:${lonValue.toString().take(9)}"
                     if (!seen.add(key)) continue
                     val geometry = JSONObject().put("type", "Point").put("coordinates", org.json.JSONArray().put(lonValue).put(latValue))
-                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", kind).put("kind", kind)))
+                    features.put(JSONObject().put("type", "Feature").put("geometry", geometry).put("properties", JSONObject().put("label", label).put("kind", kind)))
                 }
                 JSONObject().put("type", "FeatureCollection").put("features", features).toString()
             }.onFailure { android.util.Log.w("HAULWAY_MAPLIBRE", "Road sign data unavailable", it) }.getOrNull()
