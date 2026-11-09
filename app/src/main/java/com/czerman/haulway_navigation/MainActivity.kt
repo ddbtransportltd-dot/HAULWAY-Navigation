@@ -1040,7 +1040,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
     Column(Modifier.fillMaxSize().background(Color(0xFF080E13)).padding(5.dp)) {
         DeviceStatusHeader(modifier = Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 6.dp))
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Compact right-hand information rail: upcoming turns, parking and services.
+            // Left-hand turning instructions and trip information; map is on the right.
             Column(
                 Modifier.weight(0.35f).fillMaxHeight().clip(RoundedCornerShape(10.dp))
                     .background(Color(0xFF0B1117)).padding(5.dp),
@@ -1081,18 +1081,18 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), color = Color(0xFF123149), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF168FE8))) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(distanceLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text("DISTANCE LEFT", color = Color(0xFF9FC5DC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(distanceLabel, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                             Spacer(Modifier.width(5.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(etaLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text("ETA / DURATION", color = Color(0xFF9FC5DC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(etaLabel, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                             Spacer(Modifier.width(4.dp))
                             Column(Modifier.weight(0.75f)) {
-                                Text("ARRIVAL", color = Color(0xFF9FC5DC), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                Text(arrivalLabel, color = White, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text("ARRIVAL", color = Color(0xFF9FC5DC), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(arrivalLabel, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                         }
                     }
@@ -1175,7 +1175,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                                     Text(laneHint, color = Color(0xFF8BD5FF), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1)
                                     Text(maneuver.roadName.ifBlank { "Follow the highlighted route" }, color = Color(0xFFE5EDF2), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                                 }
-                                Icon(Icons.Default.Signpost, null, tint = Color(0xFFFFD166), modifier = Modifier.size(27.dp))
+                                Icon(Icons.Default.Navigation, null, tint = Color(0xFFFFD166), modifier = Modifier.size(27.dp))
                             }
                         }
                     }
@@ -1183,7 +1183,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
 
                 if (offRoute) {
                     Surface(
-                        Modifier.align(Alignment.TopCenter).padding(top = 12.dp, start = 12.dp, end = 12.dp),
+                        Modifier.align(Alignment.TopCenter).padding(top = 150.dp, start = 12.dp, end = 12.dp),
                         shape = RoundedCornerShape(8.dp), color = Color(0xF2A94B12),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB15C))
                     ) {
