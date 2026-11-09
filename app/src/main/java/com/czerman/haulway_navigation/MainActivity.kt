@@ -1611,7 +1611,7 @@ private fun DrivingNavigationScreen(onNavigate: (String) -> Unit) {
                         }
                     } else {
                         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                            GoogleStreetViewPreview(previewPlace.latitude, previewPlace.longitude,
+                            StreetImageryPreview(previewPlace.latitude, previewPlace.longitude,
                                 Modifier.fillMaxWidth().height(190.dp))
                             Text(previewPlace.name, color = White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                             Text("Selected destination · map preview", color = Color(0xFF8BD5FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -1718,7 +1718,7 @@ private fun MapSelectedPlaceCard(
                 Icon(Icons.Default.Close, contentDescription = "Close place preview", tint = Color.White,
                     modifier = Modifier.size(20.dp).clickable { onClose() })
             }
-            GoogleStreetViewPreview(place.latitude, place.longitude, Modifier.fillMaxWidth().height(112.dp))
+            StreetImageryPreview(place.latitude, place.longitude, Modifier.fillMaxWidth().height(112.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(onClick = onSave, modifier = Modifier.weight(1f).height(36.dp),
                     contentPadding = PaddingValues(horizontal = 5.dp, vertical = 2.dp),
@@ -1740,35 +1740,89 @@ private fun MapSelectedPlaceCard(
 }
 
 @Composable
-private fun GoogleStreetViewPreview(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
-    val imageState = produceState<Pair<androidx.compose.ui.graphics.ImageBitmap?, String>>(initialValue = null to "LOADING STREET VIEW…", latitude, longitude) {
-        value = null to "LOADING STREET VIEW…"
-        val key = BuildConfig.GOOGLE_MAPS_API_KEY
-        if (key.isBlank()) {
-            value = null to "GOOGLE MAPS API KEY NOT INCLUDED IN THIS APK — CHECK GITHUB SECRET"
-            return@produceState
-        }
+private fun StreetImageryPreview(latitude: Double, longitude: Double, modifier: Modifier = Modifier) {
+    val imageState = produceState<Pair<androidx.compose.ui.graphics.ImageBitmap?, String>>(
+        initialValue = null to "SEARCHING FREE STREET IMAGERY…", latitude, longitude
+    ) {
+        value = null to "SEARCHING FREE STREET IMAGERY…"
         value = withContext(Dispatchers.IO) {
-            try {
-                val url = URL("https://maps.googleapis.com/maps/api/streetview?size=640x320&location=" + latitude + "," + longitude + "&fov=90&pitch=0&key=" + URLEncoder.encode(key, "UTF-8"))
-                val connection = (url.openConnection() as HttpURLConnection).apply {
+            fun fetchBitmap(url: String): androidx.compose.ui.graphics.ImageBitmap? {
+                val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 7000
                     readTimeout = 9000
+                    setRequestProperty("User-Agent", "HAULWAYNavigation/1.0")
                 }
-                try {
-                    val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
-                    if (bitmap != null) bitmap.asImageBitmap() to "GOOGLE STREET VIEW"
-                    else null to "NO STREET VIEW IMAGE"
+                return try {
+                    if (connection.responseCode !in 200..299) null
+                    else connection.inputStream.use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
                 } finally { connection.disconnect() }
+            }
+            try {
+                var result: Pair<androidx.compose.ui.graphics.ImageBitmap?, String>? = null
+                val token = BuildConfig.MAPILLARY_ACCESS_TOKEN
+                if (token.isNotBlank()) {
+                    val bboxDelta = 0.005
+                    val bbox = "${longitude-bboxDelta},${latitude-bboxDelta},${longitude+bboxDelta},${latitude+bboxDelta}"
+                    val fields = URLEncoder.encode("id,thumb_1024_url,is_pano,captured_at", "UTF-8")
+                    val endpoint = "https://graph.mapillary.com/images?access_token=" +
+                        URLEncoder.encode(token, "UTF-8") + "&fields=" + fields +
+                        "&bbox=" + bbox + "&limit=20"
+                    val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 7000
+                        readTimeout = 9000
+                    }
+                    val imageUrl = try {
+                        if (connection.responseCode in 200..299) {
+                            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                            val images = json.optJSONArray("data")
+                            if (images != null && images.length() > 0) {
+                                var chosen = images.getJSONObject(0)
+                                for (i in 0 until images.length()) {
+                                    val candidate = images.getJSONObject(i)
+                                    if (candidate.optBoolean("is_pano")) { chosen = candidate; break }
+                                }
+                                chosen.optString("thumb_1024_url").takeIf { it.isNotBlank() && it != "null" }
+                            } else null
+                        } else null
+                    } finally { connection.disconnect() }
+                    if (imageUrl != null) {
+                        val bitmap = fetchBitmap(imageUrl)
+                        if (bitmap != null) result = bitmap to "MAPILLARY · STREET IMAGERY"
+                    }
+                }
+                if (result == null) {
+                    val endpoint = "https://api.openstreetcam.org/2.0/photo/?lat=$latitude&lng=$longitude&zoomLevel=18&join=sequence&radius=500&orderBy=id&orderDirection=desc"
+                    val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 7000
+                        readTimeout = 9000
+                        setRequestProperty("User-Agent", "HAULWAYNavigation/1.0")
+                    }
+                    val imageUrl = try {
+                        if (connection.responseCode in 200..299) {
+                            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                            val rows = json.optJSONObject("result")?.optJSONArray("data") ?: json.optJSONArray("data")
+                            if (rows != null && rows.length() > 0) {
+                                val item = rows.getJSONObject(0)
+                                sequenceOf("fileurlTh", "fileurlProc", "fileurl").map { item.optString(it) }
+                                    .firstOrNull { it.isNotBlank() && it != "null" }
+                            } else null
+                        } else null
+                    } finally { connection.disconnect() }
+                    if (imageUrl != null) {
+                        val bitmap = fetchBitmap(imageUrl)
+                        if (bitmap != null) result = bitmap to "KARTAVIEW · STREET IMAGERY"
+                    }
+                }
+                result ?: (null to "NO FREE STREET IMAGERY HERE")
             } catch (_: Exception) {
-                null to "STREET VIEW UNAVAILABLE HERE"
+                null to "STREET IMAGERY UNAVAILABLE"
             }
         }
     }
     Box(modifier.clip(RoundedCornerShape(9.dp)).background(Color(0xFF172630)), contentAlignment = Alignment.Center) {
         val bitmap = imageState.value.first
         if (bitmap != null) {
-            Image(bitmap = bitmap, contentDescription = "Street View preview", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            Image(bitmap = bitmap, contentDescription = "Free street-level imagery preview", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Text(imageState.value.second, color = Color.White, fontSize = 8.sp,
                 modifier = Modifier.align(Alignment.BottomEnd).background(Color(0xAA000000)).padding(horizontal = 5.dp, vertical = 3.dp))
         } else Text(imageState.value.second, color = Color(0xFFB7C4CD), fontSize = 10.sp, fontWeight = FontWeight.Bold)
