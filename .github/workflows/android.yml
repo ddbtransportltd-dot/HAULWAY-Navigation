@@ -36,17 +36,14 @@ jobs:
             ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
           fi
 
-      - name: Verify Google Street View key is available (without printing it)
+      - name: Verify Mapillary token is available (without printing it)
         env:
-          GOOGLE_STREETVIEW_API_KEY: ${{ secrets.GOOGLE_STREETVIEW_API_KEY }}
-          GOOGLE_STREET_VIEW_API_KEY: ${{ secrets.GOOGLE_STREET_VIEW_API_KEY }}
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          MAPILLARY_ACCESS_TOKEN: ${{ secrets.MAPILLARY_ACCESS_TOKEN }}
         run: |
-          if [ -n "$GOOGLE_STREETVIEW_API_KEY$GOOGLE_STREET_VIEW_API_KEY$GOOGLE_MAPS_API_KEY$GOOGLE_API_KEY" ]; then
-            echo "Google API key detected; value hidden."
+          if [ -n "$MAPILLARY_ACCESS_TOKEN" ]; then
+            echo "Mapillary access token detected; value hidden."
           else
-            echo "::warning::No Google API key secret detected. Add GOOGLE_MAPS_API_KEY (or GOOGLE_STREETVIEW_API_KEY) in repository Settings > Secrets and variables > Actions."
+            echo "::warning::MAPILLARY_ACCESS_TOKEN is missing. Mapillary imagery will be skipped; KartaView remains available without a token."
           fi
 
       - name: Build HAULWAY APK
