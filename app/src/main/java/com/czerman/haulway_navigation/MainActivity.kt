@@ -2351,7 +2351,7 @@ private fun HaulwayNativeMapCanvas(
                 }
                 val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "(node(around:220,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:220,$centerLat,$centerLon)[maxspeed];node(around:220,$centerLat,$centerLon)[maxspeed:hgv];node(around:220,$centerLat,$centerLon)[traffic_sign~\"maxspeed\"];way(around:220,$centerLat,$centerLon)[highway][maxspeed];way(around:220,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:220,$centerLat,$centerLon)[highway][traffic_sign~\"maxspeed\"];);"
+                    "(node(around:220,${centerLat},${centerLon})[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:220,${centerLat},${centerLon})[maxspeed];node(around:220,${centerLat},${centerLon})[maxspeed:hgv];node(around:220,${centerLat},${centerLon})[traffic_sign~\"maxspeed\"];node(around:220,${centerLat},${centerLon})[traffic_sign];way(around:220,${centerLat},${centerLon})[highway];);"
                 }
                 // Request way geometry as well as tags: a road's geometric centre can sit
                 // more than 120m from the route even when its carriageway follows the route.
@@ -2412,6 +2412,19 @@ private fun HaulwayNativeMapCanvas(
                     val highwayTag = tags.optString("highway")
                     val rawSpeed = tags.optString("maxspeed:hgv").ifBlank { tags.optString("maxspeed").ifBlank { Regex("\\d+(?:\\.\\d+)?").find(tags.optString("traffic_sign"))?.value.orEmpty() } }
                     val speedNumber = Regex("\\d+(?:\\.\\d+)?").find(rawSpeed)?.value?.toDoubleOrNull()
+                    val dualCarriageway = tags.optString("dual_carriageway").equals("yes", true) ||
+                        tags.optString("divided").equals("yes", true) ||
+                        (tags.optString("lanes").toIntOrNull() ?: 0) >= 4 ||
+                        (tags.optString("oneway").equals("yes", true) && (tags.optString("lanes").toIntOrNull() ?: 1) >= 2)
+                    val mappedHgvDefault = when (highwayTag) {
+                        "motorway" -> 60.0
+                        "motorway_link" -> 40.0
+                        "living_street" -> 20.0
+                        "residential", "unclassified" -> 30.0
+                        "trunk", "primary", "secondary", "tertiary" -> if (dualCarriageway) 50.0 else 40.0
+                        else -> null
+                    }
+                    val effectiveSpeedNumber = speedNumber ?: mappedHgvDefault
                     val kind: String
                     val label: String
                     when {
@@ -2419,8 +2432,8 @@ private fun HaulwayNativeMapCanvas(
                         highwayTag == "give_way" -> { kind = "GIVE WAY"; label = "GIVE WAY" }
                         highwayTag == "traffic_signals" -> { kind = "SIGNAL"; label = "●" }
                         highwayTag == "speed_camera" -> { kind = "CAMERA"; label = "CAM" }
-                        speedNumber != null -> {
-                            val mph = if (rawSpeed.contains("km/h", true) || rawSpeed.contains("kph", true)) (speedNumber * 0.621371).toInt() else speedNumber.toInt()
+                        effectiveSpeedNumber != null -> {
+                            val mph = if (speedNumber != null && (rawSpeed.contains("km/h", true) || rawSpeed.contains("kph", true))) (effectiveSpeedNumber * 0.621371).toInt() else effectiveSpeedNumber.toInt()
                             kind = "SPEED"
                             label = mph.toString()
                         }
