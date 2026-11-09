@@ -2339,7 +2339,7 @@ private fun HaulwayNativeMapCanvas(
                 }
                 val uniqueCenters = centers.distinctBy { "${it.first.toString().take(5)}:${it.second.toString().take(5)}" }.take(20)
                 val clauses = uniqueCenters.joinToString("") { (centerLat, centerLon) ->
-                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];node(around:180,$centerLat,$centerLon)[traffic_sign~"maxspeed"];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][traffic_sign~"maxspeed"];);"
+                    "(node(around:180,$centerLat,$centerLon)[highway~\"^(stop|give_way|traffic_signals|speed_camera)$\"];node(around:180,$centerLat,$centerLon)[maxspeed];node(around:180,$centerLat,$centerLon)[maxspeed:hgv];node(around:180,$centerLat,$centerLon)[traffic_sign~\"maxspeed\"];way(around:180,$centerLat,$centerLon)[highway][maxspeed];way(around:180,$centerLat,$centerLon)[highway][maxspeed:hgv];way(around:180,$centerLat,$centerLon)[highway][traffic_sign~\"maxspeed\"];);"
                 }
                 val query = "[out:json][timeout:25];($clauses);out center tags;"
                 val endpoints = listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
